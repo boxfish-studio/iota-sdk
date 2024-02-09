@@ -45,6 +45,9 @@ impl InputSelection {
             return Ok(Vec::new());
         }
 
+        use std::backtrace::Backtrace;
+        log::debug!("BACKTRACE: {:?}", Backtrace::force_capture());
+
         // Check if the requirement can be fulfilled.
         let index = self
             .available_inputs
