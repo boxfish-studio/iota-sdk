@@ -16,8 +16,9 @@ use crypto::{
     },
 };
 use iota_ledger_nano::{
-    api::errors::APIError, get_app_config, get_buffer_size, get_ledger, get_opened_app, LedgerBIP32Index,
-    Packable as LedgerNanoPackable, TransportTypes,
+    api::{constants::Protocol, errors::APIError},
+    get_app_config, get_buffer_size, get_ledger, get_opened_app, LedgerBIP32Index, Packable as LedgerNanoPackable,
+    TransportTypes,
 };
 use packable::{error::UnexpectedEOF, unpacker::SliceUnpacker, Packable, PackableExt};
 use tokio::sync::Mutex;
@@ -159,7 +160,7 @@ impl SecretManage for LedgerSecretManager {
         let lock = self.mutex.lock().await;
 
         // get ledger
-        let ledger = get_ledger(coin_type, bip32_account, self.is_simulator).map_err(Error::from)?;
+        let ledger = get_ledger(Protocol::Nova, coin_type, bip32_account, self.is_simulator).map_err(Error::from)?;
         if ledger.is_debug_app() {
             ledger
                 .set_non_interactive_mode(self.non_interactive)
@@ -206,7 +207,7 @@ impl SecretManage for LedgerSecretManager {
         // Lock the mutex to prevent multiple simultaneous requests to a ledger.
         let lock = self.mutex.lock().await;
 
-        let ledger = get_ledger(coin_type, account_index, self.is_simulator).map_err(Error::from)?;
+        let ledger = get_ledger(Protocol::Nova, coin_type, account_index, self.is_simulator).map_err(Error::from)?;
         if ledger.is_debug_app() {
             ledger
                 .set_non_interactive_mode(self.non_interactive)
@@ -287,7 +288,7 @@ impl SecretManage for LedgerSecretManager {
         // lock the mutex to prevent multiple simultaneous requests to a ledger
         let lock = self.mutex.lock().await;
 
-        let ledger = get_ledger(coin_type, bip32_account, self.is_simulator).map_err(Error::from)?;
+        let ledger = get_ledger(Protocol::Nova, coin_type, bip32_account, self.is_simulator).map_err(Error::from)?;
         if ledger.is_debug_app() {
             ledger
                 .set_non_interactive_mode(self.non_interactive)
@@ -524,7 +525,7 @@ fn merge_unlocks(
     mut unlocks: impl Iterator<Item = Unlock>,
     protocol_parameters: &ProtocolParameters,
 ) -> Result<Vec<Unlock>, Error> {
-    let slot_index = prepared_transaction_data
+    let commitment_slot_index = prepared_transaction_data
         .transaction
         .context_inputs()
         .commitment()
@@ -539,7 +540,7 @@ fn merge_unlocks(
         // Get the address that is required to unlock the input
         let required_address = input
             .output
-            .required_address(slot_index, protocol_parameters.committable_age_range())?
+            .required_address(commitment_slot_index, protocol_parameters.committable_age_range())?
             // Time in which no address can unlock the output because of an expiration unlock condition
             .ok_or(Error::ExpirationDeadzone)?;
 
@@ -578,7 +579,7 @@ fn merge_unlocks(
                         Address::Ed25519(ed25519_address) => ed25519_address,
                         _ => return Err(Error::MissingInputWithEd25519Address),
                     };
-                    ed25519_signature.is_valid(transaction_signing_hash.as_ref(), &ed25519_address)?;
+                    ed25519_signature.validate(transaction_signing_hash.as_ref(), &ed25519_address)?;
                 }
 
                 merged_unlocks.push(unlock);
