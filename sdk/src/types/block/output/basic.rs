@@ -13,9 +13,11 @@ use crate::types::block::{
             verify_allowed_unlock_conditions, verify_restricted_addresses, AddressUnlockCondition,
             StorageDepositReturnUnlockCondition, UnlockCondition, UnlockConditionFlags, UnlockConditions,
         },
-        MinimumOutputAmount, NativeToken, Output, OutputBuilderAmount, StorageScore, StorageScoreParameters,
+        DecayedMana, MinimumOutputAmount, NativeToken, Output, OutputBuilderAmount, StorageScore,
+        StorageScoreParameters,
     },
     protocol::{ProtocolParameters, WorkScore, WorkScoreParameters},
+    slot::SlotIndex,
     Error,
 };
 
@@ -188,7 +190,7 @@ impl BasicOutputBuilder {
     pub fn finish(self) -> Result<BasicOutput, Error> {
         let unlock_conditions = UnlockConditions::from_set(self.unlock_conditions)?;
 
-        verify_unlock_conditions::<true>(&unlock_conditions)?;
+        verify_unlock_conditions(&unlock_conditions)?;
 
         let features = Features::from_set(self.features)?;
 
@@ -198,7 +200,7 @@ impl BasicOutputBuilder {
             features.native_token(),
             self.mana,
         )?;
-        verify_features::<true>(&features)?;
+        verify_features(&features)?;
 
         let mut output = BasicOutput {
             amount: 0,
@@ -348,6 +350,40 @@ impl BasicOutput {
             .unwrap()
             .amount()
     }
+
+    /// Returns all the mana held by the output, which is potential + stored, all decayed.
+    pub fn available_mana(
+        &self,
+        protocol_parameters: &ProtocolParameters,
+        creation_index: SlotIndex,
+        target_index: SlotIndex,
+    ) -> Result<u64, Error> {
+        let decayed_mana = self.decayed_mana(protocol_parameters, creation_index, target_index)?;
+
+        decayed_mana
+            .stored
+            .checked_add(decayed_mana.potential)
+            .ok_or(Error::ConsumedManaOverflow)
+    }
+
+    /// Returns the decayed stored and potential mana of the output.
+    pub fn decayed_mana(
+        &self,
+        protocol_parameters: &ProtocolParameters,
+        creation_index: SlotIndex,
+        target_index: SlotIndex,
+    ) -> Result<DecayedMana, Error> {
+        let min_deposit = self.minimum_amount(protocol_parameters.storage_score_parameters());
+        let generation_amount = self.amount().saturating_sub(min_deposit);
+        let stored_mana = protocol_parameters.mana_with_decay(self.mana(), creation_index, target_index)?;
+        let potential_mana =
+            protocol_parameters.generate_mana_with_decay(generation_amount, creation_index, target_index)?;
+
+        Ok(DecayedMana {
+            stored: stored_mana,
+            potential: potential_mana,
+        })
+    }
 }
 
 impl StorageScore for BasicOutput {
@@ -368,38 +404,30 @@ impl WorkScore for BasicOutput {
 
 impl MinimumOutputAmount for BasicOutput {}
 
-fn verify_unlock_conditions<const VERIFY: bool>(unlock_conditions: &UnlockConditions) -> Result<(), Error> {
-    if VERIFY {
-        if unlock_conditions.address().is_none() {
-            Err(Error::MissingAddressUnlockCondition)
-        } else {
-            verify_allowed_unlock_conditions(unlock_conditions, BasicOutput::ALLOWED_UNLOCK_CONDITIONS)
-        }
+fn verify_unlock_conditions(unlock_conditions: &UnlockConditions) -> Result<(), Error> {
+    if unlock_conditions.address().is_none() {
+        Err(Error::MissingAddressUnlockCondition)
     } else {
-        Ok(())
+        verify_allowed_unlock_conditions(unlock_conditions, BasicOutput::ALLOWED_UNLOCK_CONDITIONS)
     }
 }
 
-fn verify_unlock_conditions_packable<const VERIFY: bool>(
+fn verify_unlock_conditions_packable(
     unlock_conditions: &UnlockConditions,
     _: &ProtocolParameters,
 ) -> Result<(), Error> {
-    verify_unlock_conditions::<VERIFY>(unlock_conditions)
+    verify_unlock_conditions(unlock_conditions)
 }
 
-fn verify_features<const VERIFY: bool>(features: &Features) -> Result<(), Error> {
-    if VERIFY {
-        verify_allowed_features(features, BasicOutput::ALLOWED_FEATURES)
-    } else {
-        Ok(())
-    }
+fn verify_features(features: &Features) -> Result<(), Error> {
+    verify_allowed_features(features, BasicOutput::ALLOWED_FEATURES)
 }
 
-fn verify_features_packable<const VERIFY: bool>(features: &Features, _: &ProtocolParameters) -> Result<(), Error> {
-    verify_features::<VERIFY>(features)
+fn verify_features_packable(features: &Features, _: &ProtocolParameters) -> Result<(), Error> {
+    verify_features(features)
 }
 
-fn verify_basic_output<const VERIFY: bool>(output: &BasicOutput, _: &ProtocolParameters) -> Result<(), Error> {
+fn verify_basic_output(output: &BasicOutput, _: &ProtocolParameters) -> Result<(), Error> {
     verify_restricted_addresses(
         output.unlock_conditions(),
         BasicOutput::KIND,
@@ -465,14 +493,14 @@ mod dto {
     crate::impl_serde_typed_dto!(BasicOutput, BasicOutputDto, "basic output");
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "protocol_parameters_samples"))]
 mod tests {
     use pretty_assertions::assert_eq;
 
     use super::*;
     use crate::types::block::{
         output::{basic::dto::BasicOutputDto, FoundryId, SimpleTokenScheme, TokenId},
-        protocol::protocol_parameters,
+        protocol::iota_mainnet_protocol_parameters,
         rand::{
             address::rand_account_address,
             output::{
@@ -483,7 +511,7 @@ mod tests {
 
     #[test]
     fn to_from_dto() {
-        let protocol_parameters = protocol_parameters();
+        let protocol_parameters = iota_mainnet_protocol_parameters();
         let basic_output = rand_basic_output(protocol_parameters.token_supply());
         let dto = BasicOutputDto::from(&basic_output);
         let output = Output::Basic(BasicOutput::try_from(dto).unwrap());

@@ -24,8 +24,8 @@ use iota_sdk::{
     utils::ConvertTo,
     wallet::{
         types::OutputData, BeginStakingParams, ConsolidationParams, CreateDelegationParams, CreateNativeTokenParams,
-        Error as WalletError, MintNftParams, OutputsToClaim, SendNativeTokenParams, SendNftParams, SendParams,
-        SyncOptions, TransactionOptions, Wallet,
+        Error as WalletError, MintNftParams, OutputsToClaim, ReturnStrategy, SendManaParams, SendNativeTokenParams,
+        SendNftParams, SendParams, SyncOptions, TransactionOptions, Wallet,
     },
     U256,
 };
@@ -53,7 +53,7 @@ impl WalletCli {
 }
 
 /// Commands
-#[derive(Debug, Subcommand, strum::EnumVariantNames)]
+#[derive(Debug, Subcommand, strum::VariantNames)]
 #[strum(serialize_all = "kebab-case")]
 #[allow(clippy::large_enum_variant)]
 pub enum WalletCommand {
@@ -79,6 +79,9 @@ pub enum WalletCommand {
         fixed_cost: u64,
         /// The staking period (in epochs). Will default to the staking unbonding period.
         staking_period: Option<u32>,
+        /// Whether to allot mana from the account output.
+        #[arg(long, default_value_t = true)]
+        allot_from_account: bool,
     },
     /// Burn an amount of native token.
     BurnNativeToken {
@@ -164,6 +167,9 @@ pub enum WalletCommand {
     EndStaking {
         /// The Account ID of the staking account.
         account_id: AccountId,
+        /// Whether to allot mana from the account output.
+        #[arg(long, default_value_t = true)]
+        allot_from_account: bool,
     },
     /// Exit the CLI wallet.
     Exit,
@@ -173,6 +179,9 @@ pub enum WalletCommand {
         account_id: AccountId,
         /// The number of additional epochs to add to the staking period.
         additional_epochs: u32,
+        /// Whether to allot mana from the account output.
+        #[arg(long, default_value_t = true)]
+        allot_from_account: bool,
     },
     /// Request funds from the faucet.
     Faucet {
@@ -271,6 +280,16 @@ pub enum WalletCommand {
         /// conditions if necessary. This flag is implied by the existence of a return address or expiration.
         #[arg(long, default_value_t = false)]
         allow_micro_amount: bool,
+    },
+    /// Send mana.
+    SendMana {
+        /// Recipient address, e.g. rms1qztwng6cty8cfm42nzvq099ev7udhrnk0rw8jt8vttf9kpqnxhpsx869vr3.
+        address: Bech32Address,
+        /// Amount of mana to send, e.g. 1000000.
+        mana: u64,
+        /// Whether to gift the storage deposit or not.
+        #[arg(short, long, default_value_t = false)]
+        gift: bool,
     },
     /// Send a native token.
     /// This will create an output with an expiration and storage deposit return unlock condition.
@@ -472,6 +491,7 @@ pub async fn begin_staking_command(
     staked_amount: u64,
     fixed_cost: u64,
     staking_period: Option<u32>,
+    allot_from_account: bool,
 ) -> Result<(), Error> {
     println_log_info!("Begin staking for {account_id}.");
 
@@ -483,7 +503,10 @@ pub async fn begin_staking_command(
                 fixed_cost,
                 staking_period,
             },
-            None,
+            TransactionOptions {
+                allow_allotting_from_account_mana: allot_from_account,
+                ..Default::default()
+            },
         )
         .await?;
 
@@ -793,10 +816,22 @@ pub async fn destroy_foundry_command(wallet: &Wallet, foundry_id: FoundryId) -> 
 }
 
 // `end-staking` command
-pub async fn end_staking_command(wallet: &Wallet, account_id: AccountId) -> Result<(), Error> {
+pub async fn end_staking_command(
+    wallet: &Wallet,
+    account_id: AccountId,
+    allot_from_account: bool,
+) -> Result<(), Error> {
     println_log_info!("Ending staking for {account_id}.");
 
-    let transaction = wallet.end_staking(account_id).await?;
+    let transaction = wallet
+        .end_staking(
+            account_id,
+            TransactionOptions {
+                allow_allotting_from_account_mana: allot_from_account,
+                ..Default::default()
+            },
+        )
+        .await?;
 
     println_log_info!(
         "End staking transaction sent:\n{:?}\n{:?}",
@@ -812,10 +847,20 @@ pub async fn extend_staking_command(
     wallet: &Wallet,
     account_id: AccountId,
     additional_epochs: u32,
+    allot_from_account: bool,
 ) -> Result<(), Error> {
     println_log_info!("Extending staking for {account_id} by {additional_epochs} epochs.");
 
-    let transaction = wallet.extend_staking(account_id, additional_epochs).await?;
+    let transaction = wallet
+        .extend_staking(
+            account_id,
+            additional_epochs,
+            TransactionOptions {
+                allow_allotting_from_account_mana: allot_from_account,
+                ..Default::default()
+            },
+        )
+        .await?;
 
     println_log_info!(
         "Extend staking transaction sent:\n{:?}\n{:?}",
@@ -1023,6 +1068,29 @@ pub async fn send_command(
             },
         )
         .await?;
+
+    println_log_info!(
+        "Transaction sent:\n{:?}\n{:?}",
+        transaction.transaction_id,
+        transaction.block_id
+    );
+
+    Ok(())
+}
+
+// `send-mana` command
+pub async fn send_mana_command(
+    wallet: &Wallet,
+    address: impl ConvertTo<Bech32Address>,
+    mana: u64,
+    gift: bool,
+) -> Result<(), Error> {
+    let params = SendManaParams::new(mana, address.convert()?).with_return_strategy(if gift {
+        ReturnStrategy::Gift
+    } else {
+        ReturnStrategy::Return
+    });
+    let transaction = wallet.send_mana(params, None).await?;
 
     println_log_info!(
         "Transaction sent:\n{:?}\n{:?}",
@@ -1404,9 +1472,18 @@ pub async fn prompt_internal(
                             staked_amount,
                             fixed_cost,
                             staking_period,
+                            allot_from_account,
                         } => {
                             ensure_password(wallet).await?;
-                            begin_staking_command(wallet, account_id, staked_amount, fixed_cost, staking_period).await
+                            begin_staking_command(
+                                wallet,
+                                account_id,
+                                staked_amount,
+                                fixed_cost,
+                                staking_period,
+                                allot_from_account,
+                            )
+                            .await
                         }
                         WalletCommand::BurnNativeToken { token_id, amount } => {
                             ensure_password(wallet).await?;
@@ -1478,9 +1555,12 @@ pub async fn prompt_internal(
                             ensure_password(wallet).await?;
                             destroy_foundry_command(wallet, foundry_id).await
                         }
-                        WalletCommand::EndStaking { account_id } => {
+                        WalletCommand::EndStaking {
+                            account_id,
+                            allot_from_account,
+                        } => {
                             ensure_password(wallet).await?;
-                            end_staking_command(wallet, account_id).await
+                            end_staking_command(wallet, account_id, allot_from_account).await
                         }
                         WalletCommand::Exit => {
                             return Ok(PromptResponse::Done);
@@ -1488,9 +1568,10 @@ pub async fn prompt_internal(
                         WalletCommand::ExtendStaking {
                             account_id,
                             additional_epochs,
+                            allot_from_account,
                         } => {
                             ensure_password(wallet).await?;
-                            extend_staking_command(wallet, account_id, additional_epochs).await
+                            extend_staking_command(wallet, account_id, additional_epochs, allot_from_account).await
                         }
                         WalletCommand::Faucet { address, url } => faucet_command(wallet, address, url).await,
                         WalletCommand::ImplicitAccountCreationAddress => {
@@ -1556,6 +1637,10 @@ pub async fn prompt_internal(
                                 allow_micro_amount
                             };
                             send_command(wallet, address, amount, return_address, expiration, allow_micro_amount).await
+                        }
+                        WalletCommand::SendMana { address, mana, gift } => {
+                            ensure_password(wallet).await?;
+                            send_mana_command(wallet, address, mana, gift).await
                         }
                         WalletCommand::SendNativeToken {
                             address,

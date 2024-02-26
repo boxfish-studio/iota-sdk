@@ -13,11 +13,11 @@ use crate::types::block::{
             verify_allowed_unlock_conditions, verify_restricted_addresses, UnlockCondition, UnlockConditionFlags,
             UnlockConditions,
         },
-        MinimumOutputAmount, Output, OutputBuilderAmount, OutputId, StorageScore, StorageScoreParameters,
+        DecayedMana, MinimumOutputAmount, Output, OutputBuilderAmount, OutputId, StorageScore, StorageScoreParameters,
     },
     protocol::{ProtocolParameters, WorkScore, WorkScoreParameters},
     semantic::TransactionFailureReason,
-    slot::EpochIndex,
+    slot::{EpochIndex, SlotIndex},
     Error,
 };
 
@@ -163,11 +163,11 @@ impl DelegationOutputBuilder {
     pub fn finish(self) -> Result<DelegationOutput, Error> {
         let validator_address = Address::from(self.validator_address);
 
-        verify_validator_address::<true>(&validator_address)?;
+        verify_validator_address(&validator_address)?;
 
         let unlock_conditions = UnlockConditions::from_set(self.unlock_conditions)?;
 
-        verify_unlock_conditions::<true>(&unlock_conditions)?;
+        verify_unlock_conditions(&unlock_conditions)?;
         verify_restricted_addresses(&unlock_conditions, DelegationOutput::KIND, None, 0)?;
 
         let mut output = DelegationOutput {
@@ -331,6 +331,39 @@ impl DelegationOutput {
         ChainId::Delegation(self.delegation_id)
     }
 
+    /// Returns all the mana held by the output, which is potential + stored, all decayed.
+    pub fn available_mana(
+        &self,
+        protocol_parameters: &ProtocolParameters,
+        creation_index: SlotIndex,
+        target_index: SlotIndex,
+    ) -> Result<u64, Error> {
+        let decayed_mana = self.decayed_mana(protocol_parameters, creation_index, target_index)?;
+
+        decayed_mana
+            .stored
+            .checked_add(decayed_mana.potential)
+            .ok_or(Error::ConsumedManaOverflow)
+    }
+
+    /// Returns the decayed stored and potential mana of the output.
+    pub fn decayed_mana(
+        &self,
+        protocol_parameters: &ProtocolParameters,
+        creation_index: SlotIndex,
+        target_index: SlotIndex,
+    ) -> Result<DecayedMana, Error> {
+        let min_deposit = self.minimum_amount(protocol_parameters.storage_score_parameters());
+        let generation_amount = self.amount().saturating_sub(min_deposit);
+        let potential_mana =
+            protocol_parameters.generate_mana_with_decay(generation_amount, creation_index, target_index)?;
+
+        Ok(DecayedMana {
+            stored: 0,
+            potential: potential_mana,
+        })
+    }
+
     // Transition, just without full SemanticValidationContext.
     pub(crate) fn transition_inner(current_state: &Self, next_state: &Self) -> Result<(), TransactionFailureReason> {
         if !current_state.delegation_id.is_null() || next_state.delegation_id.is_null() {
@@ -366,50 +399,38 @@ impl WorkScore for DelegationOutput {
 
 impl MinimumOutputAmount for DelegationOutput {}
 
-fn verify_validator_address<const VERIFY: bool>(validator_address: &Address) -> Result<(), Error> {
-    if VERIFY {
-        if let Address::Account(validator_address) = validator_address {
-            if validator_address.is_null() {
-                return Err(Error::NullDelegationValidatorId);
-            }
-        } else {
-            return Err(Error::InvalidAddressKind(validator_address.kind()));
+fn verify_validator_address(validator_address: &Address) -> Result<(), Error> {
+    if let Address::Account(validator_address) = validator_address {
+        if validator_address.is_null() {
+            return Err(Error::NullDelegationValidatorId);
         }
+    } else {
+        return Err(Error::InvalidAddressKind(validator_address.kind()));
     }
 
     Ok(())
 }
 
-fn verify_validator_address_packable<const VERIFY: bool>(
-    validator_address: &Address,
-    _: &ProtocolParameters,
-) -> Result<(), Error> {
-    verify_validator_address::<VERIFY>(validator_address)
+fn verify_validator_address_packable(validator_address: &Address, _: &ProtocolParameters) -> Result<(), Error> {
+    verify_validator_address(validator_address)
 }
 
-fn verify_unlock_conditions<const VERIFY: bool>(unlock_conditions: &UnlockConditions) -> Result<(), Error> {
-    if VERIFY {
-        if unlock_conditions.address().is_none() {
-            Err(Error::MissingAddressUnlockCondition)
-        } else {
-            verify_allowed_unlock_conditions(unlock_conditions, DelegationOutput::ALLOWED_UNLOCK_CONDITIONS)
-        }
+fn verify_unlock_conditions(unlock_conditions: &UnlockConditions) -> Result<(), Error> {
+    if unlock_conditions.address().is_none() {
+        Err(Error::MissingAddressUnlockCondition)
     } else {
-        Ok(())
+        verify_allowed_unlock_conditions(unlock_conditions, DelegationOutput::ALLOWED_UNLOCK_CONDITIONS)
     }
 }
 
-fn verify_unlock_conditions_packable<const VERIFY: bool>(
+fn verify_unlock_conditions_packable(
     unlock_conditions: &UnlockConditions,
     _: &ProtocolParameters,
 ) -> Result<(), Error> {
-    verify_unlock_conditions::<VERIFY>(unlock_conditions)
+    verify_unlock_conditions(unlock_conditions)
 }
 
-fn verify_delegation_output<const VERIFY: bool>(
-    output: &DelegationOutput,
-    _: &ProtocolParameters,
-) -> Result<(), Error> {
+fn verify_delegation_output(output: &DelegationOutput, _: &ProtocolParameters) -> Result<(), Error> {
     verify_restricted_addresses(output.unlock_conditions(), DelegationOutput::KIND, None, 0)
 }
 

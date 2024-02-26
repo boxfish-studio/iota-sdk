@@ -18,12 +18,13 @@ use crate::types::block::{
         account::AccountId,
         feature::{verify_allowed_features, Feature, FeatureFlags, Features, NativeTokenFeature},
         unlock_condition::{verify_allowed_unlock_conditions, UnlockCondition, UnlockConditionFlags, UnlockConditions},
-        ChainId, MinimumOutputAmount, NativeToken, Output, OutputBuilderAmount, StorageScore, StorageScoreParameters,
-        TokenId, TokenScheme,
+        ChainId, DecayedMana, MinimumOutputAmount, NativeToken, Output, OutputBuilderAmount, StorageScore,
+        StorageScoreParameters, TokenId, TokenScheme,
     },
     payload::signed_transaction::{TransactionCapabilities, TransactionCapabilityFlag},
     protocol::{ProtocolParameters, WorkScore, WorkScoreParameters},
     semantic::TransactionFailureReason,
+    slot::SlotIndex,
     Error,
 };
 
@@ -401,6 +402,39 @@ impl FoundryOutput {
         ChainId::Foundry(self.id())
     }
 
+    /// Returns all the mana held by the output, which is potential + stored, all decayed.
+    pub fn available_mana(
+        &self,
+        protocol_parameters: &ProtocolParameters,
+        creation_index: SlotIndex,
+        target_index: SlotIndex,
+    ) -> Result<u64, Error> {
+        let decayed_mana = self.decayed_mana(protocol_parameters, creation_index, target_index)?;
+
+        decayed_mana
+            .stored
+            .checked_add(decayed_mana.potential)
+            .ok_or(Error::ConsumedManaOverflow)
+    }
+
+    /// Returns the decayed stored and potential mana of the output.
+    pub fn decayed_mana(
+        &self,
+        protocol_parameters: &ProtocolParameters,
+        creation_index: SlotIndex,
+        target_index: SlotIndex,
+    ) -> Result<DecayedMana, Error> {
+        let min_deposit = self.minimum_amount(protocol_parameters.storage_score_parameters());
+        let generation_amount = self.amount().saturating_sub(min_deposit);
+        let potential_mana =
+            protocol_parameters.generate_mana_with_decay(generation_amount, creation_index, target_index)?;
+
+        Ok(DecayedMana {
+            stored: 0,
+            potential: potential_mana,
+        })
+    }
+
     // Transition, just without full SemanticValidationContext
     pub(crate) fn transition_inner(
         current_state: &Self,
@@ -526,30 +560,30 @@ impl Packable for FoundryOutput {
         Ok(())
     }
 
-    fn unpack<U: Unpacker, const VERIFY: bool>(
+    fn unpack<U: Unpacker>(
         unpacker: &mut U,
-        visitor: &Self::UnpackVisitor,
+        visitor: Option<&Self::UnpackVisitor>,
     ) -> Result<Self, UnpackError<Self::UnpackError, U::Error>> {
-        let amount = u64::unpack::<_, VERIFY>(unpacker, &()).coerce()?;
+        let amount = u64::unpack_inner(unpacker, visitor).coerce()?;
 
-        let serial_number = u32::unpack::<_, VERIFY>(unpacker, &()).coerce()?;
-        let token_scheme = TokenScheme::unpack::<_, VERIFY>(unpacker, &())?;
+        let serial_number = u32::unpack_inner(unpacker, visitor).coerce()?;
+        let token_scheme = TokenScheme::unpack_inner(unpacker, visitor)?;
 
-        let unlock_conditions = UnlockConditions::unpack::<_, VERIFY>(unpacker, visitor)?;
+        let unlock_conditions = UnlockConditions::unpack(unpacker, visitor)?;
 
-        if VERIFY {
+        if visitor.is_some() {
             verify_unlock_conditions(&unlock_conditions).map_err(UnpackError::Packable)?;
         }
 
-        let features = Features::unpack::<_, VERIFY>(unpacker, &())?;
+        let features = Features::unpack_inner(unpacker, visitor)?;
 
-        if VERIFY {
+        if visitor.is_some() {
             verify_allowed_features(&features, Self::ALLOWED_FEATURES).map_err(UnpackError::Packable)?;
         }
 
-        let immutable_features = Features::unpack::<_, VERIFY>(unpacker, &())?;
+        let immutable_features = Features::unpack_inner(unpacker, visitor)?;
 
-        if VERIFY {
+        if visitor.is_some() {
             verify_allowed_features(&immutable_features, Self::ALLOWED_IMMUTABLE_FEATURES)
                 .map_err(UnpackError::Packable)?;
         }
@@ -641,18 +675,19 @@ mod dto {
     crate::impl_serde_typed_dto!(FoundryOutput, FoundryOutputDto, "foundry output");
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "protocol_parameters_samples"))]
 mod tests {
     use pretty_assertions::assert_eq;
 
     use super::*;
     use crate::types::block::{
-        output::foundry::dto::FoundryOutputDto, protocol::protocol_parameters, rand::output::rand_foundry_output,
+        output::foundry::dto::FoundryOutputDto, protocol::iota_mainnet_protocol_parameters,
+        rand::output::rand_foundry_output,
     };
 
     #[test]
     fn to_from_dto() {
-        let protocol_parameters = protocol_parameters();
+        let protocol_parameters = iota_mainnet_protocol_parameters();
         let foundry_output = rand_foundry_output(protocol_parameters.token_supply());
         let dto = FoundryOutputDto::from(&foundry_output);
         let output = Output::Foundry(FoundryOutput::try_from(dto).unwrap());
