@@ -7,6 +7,8 @@ import type {
     __GetOutputIdsMethod__,
     __GetBasicOutputIdsMethod__,
     __GetOutputMethod__,
+    __GetOutputMetadataMethod__,
+    __GetOutputWithMetadataMethod__,
     __GetOutputsMethod__,
     __PostBlockMethod__,
     __GetNetworkInfoMethod__,
@@ -74,6 +76,8 @@ export type __ClientMethods__ =
     | __GetOutputMethod__
     | __GetOutputIdsMethod__
     | __GetBasicOutputIdsMethod__
+    | __GetOutputMetadataMethod__
+    | __GetOutputWithMetadataMethod__
     | __GetOutputsMethod__
     | __PostBlockMethod__
     | __GetNetworkInfoMethod__

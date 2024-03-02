@@ -65,6 +65,8 @@ import {
     UtxoChangesFullResponse,
     CommitteeResponse,
     IssuanceBlockHeaderResponse,
+    OutputWithMetadataResponse,
+    OutputMetadataResponse,
 } from '../types/models/api';
 import { RoutesResponse } from '../types/models/api/routes-response';
 
@@ -375,6 +377,35 @@ export class Client {
 
         const parsed = JSON.parse(response) as Response<OutputResponse>;
         return plainToInstance(OutputResponse, parsed.payload);
+    }
+
+    /**
+     * Get output from a given output ID.
+     */
+    async getOutputMetadata(outputId: OutputId): Promise<OutputMetadataResponse> {
+        const response = await this.methodHandler.callMethod({
+            name: 'getOutputMetadata',
+            data: {
+                outputId,
+            },
+        });
+
+        return JSON.parse(response).payload;
+    }
+
+    /**
+     * Get output from a given output ID.
+     */
+    async getOutputWithMetadata(outputId: OutputId): Promise<OutputWithMetadataResponse> {
+        const response = await this.methodHandler.callMethod({
+            name: 'getOutput',
+            data: {
+                outputId,
+            },
+        });
+
+        const parsed = JSON.parse(response) as Response<OutputWithMetadataResponse>;
+        return plainToInstance(OutputWithMetadataResponse, parsed.payload);
     }
 
     /**
