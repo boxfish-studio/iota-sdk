@@ -5,3 +5,4 @@ export * from './api';
 export * from './native-token';
 export * from './storage-score';
 export * from './state';
+export * from './transaction-failure-reason';
