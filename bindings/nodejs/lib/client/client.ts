@@ -398,7 +398,7 @@ export class Client {
      */
     async getOutputWithMetadata(outputId: OutputId): Promise<OutputWithMetadataResponse> {
         const response = await this.methodHandler.callMethod({
-            name: 'getOutput',
+            name: 'getOutputWithMetadata',
             data: {
                 outputId,
             },
