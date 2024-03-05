@@ -76,16 +76,12 @@ impl Client {
         futures::future::join_all(output_ids.iter().map(|id| self.get_output_with_metadata(id)))
             .await
             .into_iter()
-<<<<<<< HEAD
             .filter(|res| {
                 !matches!(
                     res,
-                    Err(Error::Node(NodeApiError::NotFound(_))) | Err(Error::Node(NodeApiError::ResponseError { .. }))
+                    Err(ClientError::Node(NodeApiError::NotFound(_))) | Err(ClientError::Node(NodeApiError::ResponseError { .. }))
                 )
             })
-=======
-            .filter(|res| !matches!(res, Err(ClientError::Node(NodeApiError::NotFound(_)))))
->>>>>>> 67b7af7a7e5571005a182f0d95904370290daa9d
             .collect()
     }
 }
