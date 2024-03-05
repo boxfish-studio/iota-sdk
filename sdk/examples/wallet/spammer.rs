@@ -20,7 +20,7 @@ use iota_sdk::{
         output::BasicOutput,
         payload::signed_transaction::TransactionId,
     },
-    wallet::{ClientOptions, FilterOptions, Result, SendParams, Wallet},
+    wallet::{ClientOptions, FilterOptions, SendParams, Wallet},
 };
 
 // The number of spamming rounds.
@@ -31,7 +31,7 @@ const SEND_AMOUNT: u64 = 1_000_000;
 const NUM_SIMULTANEOUS_TXS: usize = 16;
 
 #[tokio::main(flavor = "multi_thread")]
-async fn main() -> Result<()> {
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // This example uses secrets in environment variables for simplicity which should not be done in production.
     dotenvy::dotenv().ok();
 
@@ -101,7 +101,7 @@ async fn main() -> Result<()> {
         println!("ROUND {i}/{NUM_ROUNDS}");
         let round_timer = tokio::time::Instant::now();
 
-        let mut tasks = tokio::task::JoinSet::<std::result::Result<(), (usize, iota_sdk::wallet::Error)>>::new();
+        let mut tasks = tokio::task::JoinSet::<std::result::Result<(), (usize, iota_sdk::wallet::WalletError)>>::new();
 
         for n in 0..num_simultaneous_txs {
             let recv_address = recv_address.clone();
@@ -160,7 +160,10 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
-async fn ensure_enough_funds(wallet: &Wallet, bech32_address: &Bech32Address) -> Result<()> {
+async fn ensure_enough_funds(
+    wallet: &Wallet,
+    bech32_address: &Bech32Address,
+) -> Result<(), Box<dyn std::error::Error>> {
     let balance = wallet.sync(None).await?;
     let available_funds = balance.base_coin().available();
     println!("Available funds: {available_funds}");
@@ -201,20 +204,21 @@ async fn ensure_enough_funds(wallet: &Wallet, bech32_address: &Bech32Address) ->
     }
 }
 
-async fn wait_for_inclusion(transaction_id: &TransactionId, wallet: &Wallet) -> Result<()> {
+async fn wait_for_inclusion(transaction_id: &TransactionId, wallet: &Wallet) -> Result<(), Box<dyn std::error::Error>> {
     println!(
         "Transaction sent: {}/transaction/{}",
         std::env::var("EXPLORER_URL").unwrap(),
         transaction_id
     );
-    // Wait for transaction to get accepted
-    let block_id = wallet
+    wallet
         .wait_for_transaction_acceptance(transaction_id, None, None)
         .await?;
+
     println!(
-        "Tx accepted in block: {}/block/{}",
+        "Tx accepted: {}/transactions/{}",
         std::env::var("EXPLORER_URL").unwrap(),
-        block_id
+        transaction_id
     );
+
     Ok(())
 }

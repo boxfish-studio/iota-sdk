@@ -1,17 +1,15 @@
 // Copyright 2020-2023 IOTA Stiftung
 // SPDX-License-Identifier: Apache-2.0
 
+mod error;
 mod utxo;
 
 use core::ops::RangeInclusive;
 
 use derive_more::From;
 
-pub use self::utxo::UtxoInput;
-use crate::types::block::{
-    protocol::{WorkScore, WorkScoreParameters},
-    Error,
-};
+pub use self::{error::InputError, utxo::UtxoInput};
+use crate::types::block::protocol::{WorkScore, WorkScoreParameters};
 
 /// The maximum number of inputs of a transaction.
 pub const INPUT_COUNT_MAX: u16 = 128;
@@ -24,8 +22,8 @@ pub const INPUT_INDEX_RANGE: RangeInclusive<u16> = 0..=INPUT_INDEX_MAX; // [0..1
 
 /// A generic input supporting different input kinds.
 #[derive(Clone, Eq, PartialEq, Hash, Ord, PartialOrd, From, packable::Packable)]
-#[packable(unpack_error = Error)]
-#[packable(tag_type = u8, with_error = Error::InvalidInputKind)]
+#[packable(unpack_error = InputError)]
+#[packable(tag_type = u8, with_error = InputError::Kind)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize), serde(untagged))]
 pub enum Input {
     /// A UTXO input.

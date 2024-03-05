@@ -16,12 +16,11 @@ use iota_sdk::{
         },
         slot::SlotIndex,
     },
-    wallet::Result,
     Wallet,
 };
 
 #[tokio::main]
-async fn main() -> Result<()> {
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // This example uses secrets in environment variables for simplicity which should not be done in production.
     dotenvy::dotenv().ok();
 
@@ -57,14 +56,14 @@ async fn main() -> Result<()> {
         let transaction = wallet.send_outputs(vec![basic_output], None).await?;
         println!("Transaction sent: {}", transaction.transaction_id);
 
-        // Wait for transaction to get accepted
-        let block_id = wallet
+        wallet
             .wait_for_transaction_acceptance(&transaction.transaction_id, None, None)
             .await?;
+
         println!(
-            "Block sent: {}/block/{}",
+            "Tx accepted: {}/transactions/{}",
             std::env::var("EXPLORER_URL").unwrap(),
-            block_id
+            transaction.transaction_id
         );
     }
 

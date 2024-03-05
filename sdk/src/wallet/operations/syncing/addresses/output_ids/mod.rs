@@ -13,21 +13,19 @@ use instant::Instant;
 
 use crate::{
     client::{
-        node_api::indexer::query_parameters::{FoundryOutputQueryParameters, OutputQueryParameters},
+        node_api::indexer::query_parameters::{
+            DelegationOutputQueryParameters, FoundryOutputQueryParameters, OutputQueryParameters,
+        },
         secret::SecretManage,
     },
     types::block::{address::Bech32Address, output::OutputId},
     wallet::{
         constants::PARALLEL_REQUESTS_AMOUNT, operations::syncing::SyncOptions,
-        types::address::AddressWithUnspentOutputs, Wallet,
+        types::address::AddressWithUnspentOutputs, Wallet, WalletError,
     },
 };
 
-impl<S: 'static + SecretManage> Wallet<S>
-where
-    crate::wallet::Error: From<S::Error>,
-    crate::client::Error: From<S::Error>,
-{
+impl<S: 'static + SecretManage> Wallet<S> {
     /// Returns output ids for outputs that are directly (Ed25519 address in AddressUnlockCondition) or indirectly
     /// (account/nft address in AddressUnlockCondition and the account/nft output is controlled with the Ed25519
     /// address) connected to
@@ -35,7 +33,7 @@ where
         &self,
         address: &Bech32Address,
         sync_options: &SyncOptions,
-    ) -> crate::wallet::Result<Vec<OutputId>> {
+    ) -> Result<Vec<OutputId>, WalletError> {
         if sync_options.sync_only_most_basic_outputs {
             let output_ids = self
                 .get_basic_output_ids_with_address_unlock_condition_only(address.clone())
@@ -84,34 +82,6 @@ where
                         tokio::spawn(async move {
                             wallet
                                 .get_basic_output_ids_with_any_unlock_condition(bech32_address)
-                                .await
-                        })
-                        .await
-                    }
-                    .boxed(),
-                );
-            }
-        }
-
-        if (address.is_ed25519() && sync_options.wallet.nft_outputs)
-            || (address.is_nft() && sync_options.nft.nft_outputs)
-            || (address.is_account() && sync_options.account.nft_outputs)
-        {
-            // nfts
-            #[cfg(target_family = "wasm")]
-            {
-                results.push(self.get_nft_output_ids_with_any_unlock_condition(address.clone()).await)
-            }
-
-            #[cfg(not(target_family = "wasm"))]
-            {
-                tasks.push(
-                    async {
-                        let bech32_address = address.clone();
-                        let wallet = self.clone();
-                        tokio::spawn(async move {
-                            wallet
-                                .get_nft_output_ids_with_any_unlock_condition(bech32_address)
                                 .await
                         })
                         .await
@@ -181,6 +151,67 @@ where
             }
         }
 
+        if (address.is_ed25519() && sync_options.wallet.nft_outputs)
+            || (address.is_nft() && sync_options.nft.nft_outputs)
+            || (address.is_account() && sync_options.account.nft_outputs)
+        {
+            // nfts
+            #[cfg(target_family = "wasm")]
+            {
+                results.push(self.get_nft_output_ids_with_any_unlock_condition(address.clone()).await)
+            }
+
+            #[cfg(not(target_family = "wasm"))]
+            {
+                tasks.push(
+                    async {
+                        let bech32_address = address.clone();
+                        let wallet = self.clone();
+                        tokio::spawn(async move {
+                            wallet
+                                .get_nft_output_ids_with_any_unlock_condition(bech32_address)
+                                .await
+                        })
+                        .await
+                    }
+                    .boxed(),
+                );
+            }
+        }
+
+        if (address.is_ed25519() && sync_options.wallet.delegation_outputs)
+            || (address.is_nft() && sync_options.nft.delegation_outputs)
+            || (address.is_account() && sync_options.account.delegation_outputs)
+        {
+            // delegations
+            #[cfg(target_family = "wasm")]
+            {
+                results.push(Ok(self
+                    .client()
+                    .delegation_output_ids(DelegationOutputQueryParameters::new().address(address.clone()))
+                    .await?
+                    .items))
+            }
+
+            #[cfg(not(target_family = "wasm"))]
+            {
+                tasks.push(
+                    async {
+                        let bech32_address = address.clone();
+                        let client = self.client().clone();
+                        tokio::spawn(async move {
+                            Ok(client
+                                .delegation_output_ids(DelegationOutputQueryParameters::new().address(bech32_address))
+                                .await?
+                                .items)
+                        })
+                        .await
+                    }
+                    .boxed(),
+                );
+            }
+        }
+
         #[cfg(not(target_family = "wasm"))]
         let results = futures::future::try_join_all(tasks).await?;
 
@@ -200,7 +231,7 @@ where
         &self,
         addresses_with_unspent_outputs: Vec<AddressWithUnspentOutputs>,
         options: &SyncOptions,
-    ) -> crate::wallet::Result<(Vec<AddressWithUnspentOutputs>, Vec<OutputId>)> {
+    ) -> Result<(Vec<AddressWithUnspentOutputs>, Vec<OutputId>), WalletError> {
         log::debug!("[SYNC] start get_output_ids_for_addresses");
         let address_output_ids_start_time = Instant::now();
 
@@ -213,13 +244,13 @@ where
             .chunks(PARALLEL_REQUESTS_AMOUNT)
             .map(|x: &[AddressWithUnspentOutputs]| x.to_vec())
         {
-            let results;
+            let results: Vec<Result<_, WalletError>>;
             #[cfg(target_family = "wasm")]
             {
                 let mut tasks = Vec::new();
                 for address in addresses_chunk {
                     let output_ids = self.get_output_ids_for_address(&address.address, options).await?;
-                    tasks.push(crate::wallet::Result::Ok((address, output_ids)));
+                    tasks.push(Ok((address, output_ids)));
                 }
                 results = tasks;
             }
@@ -235,7 +266,7 @@ where
                             let output_ids = wallet
                                 .get_output_ids_for_address(&address.address, &sync_options)
                                 .await?;
-                            crate::wallet::Result::Ok((address, output_ids))
+                            Ok((address, output_ids))
                         })
                         .await
                     });

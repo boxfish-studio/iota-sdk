@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 mod block_issuer;
+mod error;
 mod issuer;
 mod metadata;
 mod native_token;
@@ -30,6 +31,7 @@ pub use self::{
     block_issuer::{
         BlockIssuerFeature, BlockIssuerKey, BlockIssuerKeySource, BlockIssuerKeys, Ed25519PublicKeyHashBlockIssuerKey,
     },
+    error::FeatureError,
     issuer::IssuerFeature,
     metadata::{MetadataFeature, MetadataFeatureMap},
     native_token::NativeTokenFeature,
@@ -41,13 +43,12 @@ pub use self::{
 use crate::types::block::{
     output::{StorageScore, StorageScoreParameters},
     protocol::{WorkScore, WorkScoreParameters},
-    Error,
 };
 
 ///
 #[derive(Clone, Eq, PartialEq, Hash, From, Packable)]
-#[packable(unpack_error = Error)]
-#[packable(tag_type = u8, with_error = Error::InvalidFeatureKind)]
+#[packable(unpack_error = FeatureError)]
+#[packable(tag_type = u8, with_error = FeatureError::Kind)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize), serde(untagged))]
 pub enum Feature {
     /// A sender feature.
@@ -185,11 +186,11 @@ pub(crate) type FeatureCount = BoundedU8<0, { FeatureFlags::ALL_FLAGS.len() as u
 
 ///
 #[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Deref, Packable)]
-#[packable(unpack_error = Error, with = |e| e.unwrap_item_err_or_else(|p| Error::InvalidFeatureCount(p.into())))]
+#[packable(unpack_error = FeatureError, with = |e| e.unwrap_item_err_or_else(|p| FeatureError::Count(p.into())))]
 pub struct Features(#[packable(verify_with = verify_unique_sorted)] BoxedSlicePrefix<Feature, FeatureCount>);
 
 impl TryFrom<Vec<Feature>> for Features {
-    type Error = Error;
+    type Error = FeatureError;
 
     #[inline(always)]
     fn try_from(features: Vec<Feature>) -> Result<Self, Self::Error> {
@@ -198,7 +199,7 @@ impl TryFrom<Vec<Feature>> for Features {
 }
 
 impl TryFrom<BTreeSet<Feature>> for Features {
-    type Error = Error;
+    type Error = FeatureError;
 
     #[inline(always)]
     fn try_from(features: BTreeSet<Feature>) -> Result<Self, Self::Error> {
@@ -217,9 +218,9 @@ impl IntoIterator for Features {
 
 impl Features {
     /// Creates a new [`Features`] from a vec.
-    pub fn from_vec(features: Vec<Feature>) -> Result<Self, Error> {
+    pub fn from_vec(features: Vec<Feature>) -> Result<Self, FeatureError> {
         let mut features = BoxedSlicePrefix::<Feature, FeatureCount>::try_from(features.into_boxed_slice())
-            .map_err(Error::InvalidFeatureCount)?;
+            .map_err(FeatureError::Count)?;
 
         features.sort_by_key(Feature::kind);
         // Sort is obviously fine now but uniqueness still needs to be checked.
@@ -229,13 +230,13 @@ impl Features {
     }
 
     /// Creates a new [`Features`] from an ordered set.
-    pub fn from_set(features: BTreeSet<Feature>) -> Result<Self, Error> {
+    pub fn from_set(features: BTreeSet<Feature>) -> Result<Self, FeatureError> {
         Ok(Self(
             features
                 .into_iter()
                 .collect::<Box<[_]>>()
                 .try_into()
-                .map_err(Error::InvalidFeatureCount)?,
+                .map_err(FeatureError::Count)?,
         ))
     }
 
@@ -297,18 +298,18 @@ impl StorageScore for Features {
 }
 
 #[inline]
-fn verify_unique_sorted(features: &[Feature]) -> Result<(), Error> {
+fn verify_unique_sorted(features: &[Feature]) -> Result<(), FeatureError> {
     if !is_unique_sorted(features.iter().map(Feature::kind)) {
-        Err(Error::FeaturesNotUniqueSorted)
+        Err(FeatureError::NotUniqueSorted)
     } else {
         Ok(())
     }
 }
 
-pub(crate) fn verify_allowed_features(features: &Features, allowed_features: FeatureFlags) -> Result<(), Error> {
+pub(crate) fn verify_allowed_features(features: &Features, allowed_features: FeatureFlags) -> Result<(), FeatureError> {
     for (index, feature) in features.iter().enumerate() {
         if !allowed_features.contains(feature.flag()) {
-            return Err(Error::UnallowedFeature {
+            return Err(FeatureError::Disallowed {
                 index,
                 kind: feature.kind(),
             });

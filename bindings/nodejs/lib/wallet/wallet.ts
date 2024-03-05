@@ -30,8 +30,9 @@ import {
     ConsolidationParams,
     CreateDelegationTransaction,
     BeginStakingParams,
+    SendManaParams,
 } from '../types/wallet';
-import { Client, INode, Burn, PreparedTransactionData } from '../client';
+import { Client, Node, Burn, PreparedTransactionData } from '../client';
 import {
     Output,
     FoundryOutput,
@@ -59,7 +60,7 @@ import {
     CreateDelegationParams,
     PreparedCreateDelegationTransactionData,
 } from '../types/wallet';
-import { IAuth, IClientOptions, LedgerNanoStatus } from '../types/client';
+import { Auth, ClientOptions, LedgerNanoStatus } from '../types/client';
 import { SecretManager } from '../secret_manager';
 import { PreparedCreateDelegationTransaction } from '../types/wallet/create-delegation-transaction';
 
@@ -223,7 +224,7 @@ export class Wallet {
     /**
      * Set ClientOptions.
      */
-    async setClientOptions(clientOptions: IClientOptions): Promise<void> {
+    async setClientOptions(clientOptions: ClientOptions): Promise<void> {
         await this.methodHandler.callMethod({
             name: 'setClientOptions',
             data: { clientOptions },
@@ -290,7 +291,7 @@ export class Wallet {
     /**
      * Update the authentication for the provided node.
      */
-    async updateNodeAuth(url: string, auth?: IAuth): Promise<void> {
+    async updateNodeAuth(url: string, auth?: Auth): Promise<void> {
         await this.methodHandler.callMethod({
             name: 'updateNodeAuth',
             data: { url, auth },
@@ -737,7 +738,7 @@ export class Wallet {
      * @param eventType The type of events to get.
      */
     async getParticipationEventIds(
-        node: INode,
+        node: Node,
         eventType?: ParticipationEventType,
     ): Promise<ParticipationEventId[]> {
         const response = await this.methodHandler.callMethod({
@@ -1521,15 +1522,14 @@ export class Wallet {
     }
 
     /**
-     * Checks the transaction state for a provided transaction id until it's accepted. Interval in milliseconds. Returns the block id that
-     * contains this transaction.
+     * Checks the transaction state for a provided transaction id until it's accepted. Interval in milliseconds.
      */
     async waitForTransactionAcceptance(
         transactionId: TransactionId,
         interval?: number,
         maxAttempts?: number,
-    ): Promise<string> {
-        const response = await this.methodHandler.callMethod({
+    ): Promise<void> {
+        await this.methodHandler.callMethod({
             name: 'waitForTransactionAcceptance',
             data: {
                 transactionId,
@@ -1537,7 +1537,6 @@ export class Wallet {
                 maxAttempts,
             },
         });
-        return JSON.parse(response).payload;
     }
 
     /**
@@ -1706,6 +1705,48 @@ export class Wallet {
             response,
         ) as Response<TransactionWithMetadata>;
         return plainToInstance(TransactionWithMetadata, parsed.payload);
+    }
+
+    /**
+     * Send mana.
+     *
+     * @param params Amount, Address, and Return Strategy.
+     * @param transactionOptions Additional transaction options.
+     * @returns The sent transaction.
+     */
+    async sendMana(
+        params: SendManaParams,
+        transactionOptions?: TransactionOptions,
+    ): Promise<TransactionWithMetadata> {
+        return (await this.prepareSendMana(params, transactionOptions)).send();
+    }
+
+    /**
+     * Prepare to send mana.
+     *
+     * @param params Amount, Address, and Return Strategy.
+     * @param transactionOptions Additional transaction options.
+     * @returns The prepared transaction.
+     */
+    async prepareSendMana(
+        params: SendManaParams,
+        transactionOptions?: TransactionOptions,
+    ): Promise<PreparedTransaction> {
+        const response = await this.methodHandler.callMethod({
+            name: 'prepareSendMana',
+            data: {
+                params,
+                options: transactionOptions,
+            },
+        });
+
+        const parsed = JSON.parse(
+            response,
+        ) as Response<PreparedTransactionData>;
+        return new PreparedTransaction(
+            plainToInstance(PreparedTransactionData, parsed.payload),
+            this,
+        );
     }
 
     /**

@@ -17,7 +17,7 @@ use crate::{
 #[derive(Debug, derive_more::Display)]
 pub enum ProofError {
     #[display(fmt = "invalid output ID proof kind: {_0}")]
-    InvalidProofKind(u8),
+    Kind(u8),
     #[display(fmt = "index {index} is out of range, outputs length {len}")]
     IndexOutOfRange { index: u16, len: u16 },
     #[display(fmt = "no outputs provided")]
@@ -117,14 +117,14 @@ impl OutputCommitmentProof {
 
 fn verify_output_commitment_type(proof: &OutputCommitmentProof) -> Result<(), ProofError> {
     match proof {
-        OutputCommitmentProof::Leaf(_) => Err(ProofError::InvalidProofKind(LeafHash::KIND)),
+        OutputCommitmentProof::Leaf(_) => Err(ProofError::Kind(LeafHash::KIND)),
         _ => Ok(()),
     }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, derive_more::From, Packable)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize), serde(untagged))]
-#[packable(tag_type = u8, with_error = ProofError::InvalidProofKind)]
+#[packable(tag_type = u8, with_error = ProofError::Kind)]
 #[packable(unpack_error = ProofError)]
 pub enum OutputCommitmentProof {
     #[packable(tag = HashableNode::KIND)]
@@ -135,7 +135,7 @@ pub enum OutputCommitmentProof {
     Value(ValueHash),
 }
 
-/// Node contains the hashes of the left and right children of a node in the tree.
+/// Contains the hashes of the left and right children of a node in the OutputCommitmentProof tree.
 #[derive(Clone, Debug, Eq, PartialEq, Packable)]
 #[packable(unpack_visitor = ())]
 pub struct HashableNode {
@@ -154,7 +154,7 @@ impl HashableNode {
     }
 }
 
-/// Leaf Hash contains the hash of a leaf in the tree.
+/// Contains the hash of a leaf in the OutputCommitmentProof tree.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub struct LeafHash(pub [u8; 32]);
 
@@ -194,7 +194,7 @@ impl Packable for LeafHash {
     }
 }
 
-/// Value Hash contains the hash of the value for which the proof is being computed.
+/// Contains the hash of the value for which the OutputCommitmentProof is being computed.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub struct ValueHash(pub [u8; 32]);
 

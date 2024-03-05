@@ -3,6 +3,7 @@
 
 mod block_issuance_credit;
 mod commitment;
+mod error;
 mod reward;
 
 use alloc::{boxed::Box, vec::Vec};
@@ -12,15 +13,11 @@ use derive_more::{Deref, Display, From};
 use iterator_sorted::is_unique_sorted_by;
 use packable::{bounded::BoundedU16, prefix::BoxedSlicePrefix, Packable};
 
-pub(crate) use self::reward::RewardContextInputIndex;
 pub use self::{
     block_issuance_credit::BlockIssuanceCreditContextInput, commitment::CommitmentContextInput,
-    reward::RewardContextInput,
+    error::ContextInputError, reward::RewardContextInput,
 };
-use crate::types::block::{
-    protocol::{WorkScore, WorkScoreParameters},
-    Error,
-};
+use crate::types::block::protocol::{WorkScore, WorkScoreParameters};
 
 /// The maximum number of context inputs of a transaction.
 pub const CONTEXT_INPUT_COUNT_MAX: u16 = 128;
@@ -30,8 +27,8 @@ pub const CONTEXT_INPUT_COUNT_RANGE: RangeInclusive<u16> = 0..=CONTEXT_INPUT_COU
 /// A Context Input provides additional contextual information for the execution of a transaction, such as for different
 /// functionality related to accounts, commitments, or Mana rewards. A Context Input does not need to be unlocked.
 #[derive(Clone, Eq, Display, PartialEq, Hash, Ord, PartialOrd, From, packable::Packable)]
-#[packable(unpack_error = Error)]
-#[packable(tag_type = u8, with_error = Error::InvalidContextInputKind)]
+#[packable(unpack_error = ContextInputError)]
+#[packable(tag_type = u8, with_error = ContextInputError::Kind)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize), serde(untagged))]
 pub enum ContextInput {
     /// A [`CommitmentContextInput`].
@@ -85,13 +82,13 @@ pub(crate) type ContextInputCount =
     BoundedU16<{ *CONTEXT_INPUT_COUNT_RANGE.start() }, { *CONTEXT_INPUT_COUNT_RANGE.end() }>;
 
 #[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Deref, Packable)]
-#[packable(unpack_error = Error, with = |e| e.unwrap_item_err_or_else(|p| Error::InvalidContextInputCount(p.into())))]
+#[packable(unpack_error = ContextInputError, with = |e| e.unwrap_item_err_or_else(|p| ContextInputError::Count(p.into())))]
 pub struct ContextInputs(
     #[packable(verify_with = verify_context_inputs)] BoxedSlicePrefix<ContextInput, ContextInputCount>,
 );
 
 impl TryFrom<Vec<ContextInput>> for ContextInputs {
-    type Error = Error;
+    type Error = ContextInputError;
 
     #[inline(always)]
     fn try_from(features: Vec<ContextInput>) -> Result<Self, Self::Error> {
@@ -110,10 +107,10 @@ impl IntoIterator for ContextInputs {
 
 impl ContextInputs {
     /// Creates a new [`ContextInputs`] from a vec.
-    pub fn from_vec(features: Vec<ContextInput>) -> Result<Self, Error> {
+    pub fn from_vec(features: Vec<ContextInput>) -> Result<Self, ContextInputError> {
         let mut context_inputs =
             BoxedSlicePrefix::<ContextInput, ContextInputCount>::try_from(features.into_boxed_slice())
-                .map_err(Error::InvalidContextInputCount)?;
+                .map_err(ContextInputError::Count)?;
 
         context_inputs.sort_by(context_inputs_cmp);
         // Sort is obviously fine now but uniqueness still needs to be checked.
@@ -150,9 +147,9 @@ fn context_inputs_cmp(a: &ContextInput, b: &ContextInput) -> Ordering {
     })
 }
 
-fn verify_context_inputs(context_inputs: &[ContextInput]) -> Result<(), Error> {
+fn verify_context_inputs(context_inputs: &[ContextInput]) -> Result<(), ContextInputError> {
     if !is_unique_sorted_by(context_inputs.iter(), |a, b| context_inputs_cmp(a, b)) {
-        return Err(Error::ContextInputsNotUniqueSorted);
+        return Err(ContextInputError::NotUniqueSorted);
     }
 
     Ok(())

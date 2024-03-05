@@ -9,17 +9,30 @@ use packable::error::UnexpectedEOF;
 use serde::{ser::Serializer, Serialize};
 
 use crate::{
-    client::api::input_selection::Error as InputSelectionError, types::block::semantic::TransactionFailureReason,
+    client::api::input_selection::Error as InputSelectionError,
+    types::block::{
+        address::AddressError,
+        context_input::ContextInputError,
+        input::InputError,
+        mana::ManaError,
+        output::{
+            feature::FeatureError, unlock_condition::UnlockConditionError, NativeTokenError, OutputError,
+            TokenSchemeError,
+        },
+        payload::PayloadError,
+        semantic::TransactionFailureReason,
+        signature::SignatureError,
+        unlock::UnlockError,
+        BlockError,
+    },
+    utils::ConversionError,
 };
-
-/// Type alias of `Result` in iota-client
-pub type Result<T> = std::result::Result<T, Error>;
 
 /// Error type of the iota client crate.
 #[derive(Debug, thiserror::Error, strum::AsRefStr)]
 #[strum(serialize_all = "camelCase")]
 #[non_exhaustive]
-pub enum Error {
+pub enum ClientError {
     /// Invalid bech32 HRP, should match the one from the used network
     #[error("invalid bech32 hrp for the connected network: {provided}, expected: {expected}")]
     Bech32HrpMismatch {
@@ -33,7 +46,10 @@ pub enum Error {
     Blake2b256(&'static str),
     /// Block types error
     #[error("{0}")]
-    Block(#[from] crate::types::block::Error),
+    Block(#[from] BlockError),
+    /// Address types error
+    #[error("{0}")]
+    Address(#[from] AddressError),
     /// Crypto.rs error
     #[error("{0}")]
     Crypto(#[from] crypto::Error),
@@ -133,7 +149,7 @@ pub enum Error {
     TransactionSemantic(#[from] TransactionFailureReason),
     /// Unpack error
     #[error("{0}")]
-    Unpack(#[from] packable::error::UnpackError<crate::types::block::Error, UnexpectedEOF>),
+    Unpack(#[from] packable::error::UnpackError<BlockError, UnexpectedEOF>),
     /// URL auth error
     #[error("can't set {0} to URL")]
     UrlAuth(&'static str),
@@ -182,10 +198,12 @@ pub enum Error {
     #[cfg_attr(docsrs, doc(cfg(feature = "stronghold")))]
     #[error("{0}")]
     Stronghold(#[from] crate::client::stronghold::Error),
+    #[error("{0}")]
+    Convert(#[from] ConversionError),
 }
 
 // Serialize type with Display error
-impl Serialize for Error {
+impl Serialize for ClientError {
     fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
     where
         S: Serializer,
@@ -204,3 +222,17 @@ impl Serialize for Error {
         .serialize(serializer)
     }
 }
+
+crate::impl_from_error_via!(ClientError via BlockError:
+    PayloadError,
+    OutputError,
+    InputError,
+    NativeTokenError,
+    ManaError,
+    UnlockConditionError,
+    FeatureError,
+    TokenSchemeError,
+    ContextInputError,
+    UnlockError,
+    SignatureError,
+);

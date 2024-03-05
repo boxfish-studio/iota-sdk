@@ -4,6 +4,7 @@
 //! The payload module defines the core data types for representing block payloads.
 
 pub mod candidacy_announcement;
+mod error;
 pub mod signed_transaction;
 pub mod tagged_data;
 
@@ -20,19 +21,16 @@ use packable::{
 
 pub(crate) use self::signed_transaction::{InputCount, OutputCount};
 pub use self::{
-    candidacy_announcement::CandidacyAnnouncementPayload, signed_transaction::SignedTransactionPayload,
-    tagged_data::TaggedDataPayload,
+    candidacy_announcement::CandidacyAnnouncementPayload, error::PayloadError,
+    signed_transaction::SignedTransactionPayload, tagged_data::TaggedDataPayload,
 };
-use crate::types::block::{
-    protocol::{ProtocolParameters, WorkScore, WorkScoreParameters},
-    Error,
-};
+use crate::types::block::protocol::{ProtocolParameters, WorkScore, WorkScoreParameters};
 
 /// A generic payload that can represent different types defining block payloads.
 #[derive(Clone, Eq, PartialEq, From, Packable)]
-#[packable(unpack_error = Error)]
+#[packable(unpack_error = PayloadError)]
 #[packable(unpack_visitor = ProtocolParameters)]
-#[packable(tag_type = u8, with_error = Error::InvalidPayloadKind)]
+#[packable(tag_type = u8, with_error = PayloadError::Kind)]
 pub enum Payload {
     /// A tagged data payload.
     #[packable(tag = TaggedDataPayload::KIND)]
@@ -123,7 +121,7 @@ impl Deref for OptionalPayload {
 }
 
 impl Packable for OptionalPayload {
-    type UnpackError = Error;
+    type UnpackError = PayloadError;
     type UnpackVisitor = ProtocolParameters;
 
     fn pack<P: Packer>(&self, packer: &mut P) -> Result<(), P::Error> {
@@ -153,7 +151,7 @@ impl Packable for OptionalPayload {
             };
 
             if len != actual_len {
-                Err(UnpackError::Packable(Error::InvalidPayloadLength {
+                Err(UnpackError::Packable(PayloadError::Length {
                     expected: len,
                     actual: actual_len,
                 }))
@@ -172,7 +170,7 @@ pub mod dto {
 
     pub use super::signed_transaction::dto::SignedTransactionPayloadDto;
     use super::*;
-    use crate::types::{block::Error, TryFromDto};
+    use crate::types::TryFromDto;
 
     /// Describes all the different payload types.
     #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
@@ -239,7 +237,7 @@ pub mod dto {
     }
 
     impl TryFromDto<PayloadDto> for Payload {
-        type Error = Error;
+        type Error = PayloadError;
 
         fn try_from_dto_with_params_inner(
             dto: PayloadDto,

@@ -1,6 +1,7 @@
 // Copyright 2022 IOTA Stiftung
 // SPDX-License-Identifier: Apache-2.0
 
+mod error;
 #[cfg(feature = "protocol_parameters_samples")]
 mod samples;
 mod work_score;
@@ -13,19 +14,21 @@ use packable::{prefix::StringPrefix, Packable, PackableExt};
 #[cfg(feature = "protocol_parameters_samples")]
 pub use samples::{iota_mainnet_protocol_parameters, shimmer_mainnet_protocol_parameters};
 
-pub use self::work_score::{WorkScore, WorkScoreParameters};
+pub use self::{
+    error::ProtocolParametersError,
+    work_score::{WorkScore, WorkScoreParameters},
+};
 use crate::types::block::{
     address::Hrp,
     helper::network_name_to_id,
     mana::{ManaParameters, RewardsParameters},
     output::{StorageScore, StorageScoreParameters},
     slot::{EpochIndex, SlotCommitmentId, SlotIndex},
-    Error,
 };
 
 /// Defines the parameters of the protocol at a particular version.
 #[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Packable, Getters, CopyGetters)]
-#[packable(unpack_error = Error)]
+#[packable(unpack_error = ProtocolParametersError)]
 #[cfg_attr(
     feature = "serde",
     derive(serde::Serialize, serde::Deserialize),
@@ -39,7 +42,7 @@ pub struct ProtocolParameters {
     /// The version of the protocol running.
     pub(crate) version: u8,
     /// The human friendly name of the network.
-    #[packable(unpack_error_with = |err| Error::InvalidNetworkName(err.into_item_err()))]
+    #[packable(unpack_error_with = |err| ProtocolParametersError::NetworkName(err.into_item_err()))]
     #[cfg_attr(feature = "serde", serde(with = "crate::utils::serde::string_prefix"))]
     #[getset(skip)]
     pub(crate) network_name: StringPrefix<u8>,
@@ -300,7 +303,7 @@ pub struct CommittableAgeRange {
     derive(serde::Serialize, serde::Deserialize),
     serde(rename_all = "camelCase")
 )]
-#[packable(unpack_error = Error)]
+#[packable(unpack_error = ProtocolParametersError)]
 #[getset(get_copy = "pub")]
 pub struct CongestionControlParameters {
     /// Minimum value of the reference Mana cost.
@@ -331,7 +334,7 @@ pub struct CongestionControlParameters {
     derive(serde::Serialize, serde::Deserialize),
     serde(rename_all = "camelCase")
 )]
-#[packable(unpack_error = Error)]
+#[packable(unpack_error = ProtocolParametersError)]
 #[getset(get_copy = "pub")]
 pub struct VersionSignalingParameters {
     /// The size of the window in epochs that is used to find which version of protocol parameters was

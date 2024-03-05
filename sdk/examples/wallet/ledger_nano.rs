@@ -20,7 +20,7 @@ use iota_sdk::{
         secret::{ledger_nano::LedgerSecretManager, SecretManager},
     },
     crypto::keys::bip44::Bip44,
-    wallet::{ClientOptions, Result, Wallet},
+    wallet::{ClientOptions, Wallet},
 };
 
 // The address to send coins to
@@ -29,7 +29,7 @@ const RECV_ADDRESS: &str = "rms1qpszqzadsym6wpppd6z037dvlejmjuke7s24hm95s9fg9vpu
 const SEND_AMOUNT: u64 = 1_000_000;
 
 #[tokio::main]
-async fn main() -> Result<()> {
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // This example uses secrets in environment variables for simplicity which should not be done in production.
     dotenvy::dotenv().ok();
 
@@ -66,13 +66,14 @@ async fn main() -> Result<()> {
     let transaction = wallet.send(SEND_AMOUNT, RECV_ADDRESS, None).await?;
     println!("Transaction sent: {}", transaction.transaction_id);
 
-    let block_id = wallet
+    wallet
         .wait_for_transaction_acceptance(&transaction.transaction_id, None, None)
         .await?;
+
     println!(
-        "Tx accepted in block: {}/block/{}",
+        "Tx accepted: {}/transactions/{}",
         std::env::var("EXPLORER_URL").unwrap(),
-        block_id
+        transaction.transaction_id
     );
 
     let now = tokio::time::Instant::now();

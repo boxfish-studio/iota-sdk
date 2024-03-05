@@ -20,7 +20,6 @@ from .types.block.block import *
 from .types.block.body.basic import *
 from .types.block.body.type import *
 from .types.block.body.validation import *
-from .types.block.metadata import *
 from .types.block.id import *
 from .types.block_builder_options import *
 from .types.block_issuer_key import *
@@ -36,7 +35,6 @@ from .types.irc_27 import *
 from .types.irc_30 import *
 from .types.filter_options import *
 from .types.native_token import *
-from .types.network_info import *
 from .types.node_info import *
 from .types.output import *
 from .types.output_data import *

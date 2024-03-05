@@ -10,11 +10,11 @@ use iota_sdk::{
         secret::{stronghold::StrongholdSecretManager, SecretManager},
         storage::StorageAdapter,
         stronghold::{Error as StrongholdError, StrongholdAdapter},
-        Error as ClientError,
+        ClientError,
     },
     crypto::keys::bip44::Bip44,
     types::block::protocol::iota_mainnet_protocol_parameters,
-    wallet::{ClientOptions, Error as WalletError, Wallet},
+    wallet::{ClientOptions, Wallet, WalletError},
 };
 use pretty_assertions::assert_eq;
 
@@ -113,10 +113,7 @@ async fn stronghold_snapshot_v2_v3_migration() {
 
     match error {
         Err(WalletError::Client(err)) => {
-            assert!(matches!(
-                *err,
-                ClientError::Stronghold(StrongholdError::InvalidPassword)
-            ));
+            assert!(matches!(err, ClientError::Stronghold(StrongholdError::InvalidPassword)));
         }
         _ => panic!("unexpected error"),
     }

@@ -13,9 +13,9 @@ use crate::{
             node::{Node, NodeAuth, NodeDto},
         },
         secret::SecretManage,
-        Client, ClientBuilder, NetworkInfo,
+        Client, ClientBuilder, ClientError, NetworkInfo,
     },
-    wallet::{Wallet, WalletBuilder},
+    wallet::{Wallet, WalletBuilder, WalletError},
 };
 
 impl<S: 'static + SecretManage> Wallet<S> {
@@ -30,11 +30,11 @@ impl<S: 'static + SecretManage> Wallet<S> {
 
 impl<S: 'static + SecretManage> Wallet<S>
 where
-    crate::client::Error: From<S::Error>,
-    crate::wallet::Error: From<S::Error>,
+    ClientError: From<S::Error>,
+    WalletError: From<S::Error>,
     WalletBuilder<S>: SaveLoadWallet,
 {
-    pub async fn set_client_options(&self, client_options: ClientBuilder) -> crate::wallet::Result<()> {
+    pub async fn set_client_options(&self, client_options: ClientBuilder) -> Result<(), WalletError> {
         let ClientBuilder {
             node_manager_builder,
             #[cfg(feature = "mqtt")]
@@ -60,12 +60,12 @@ where
         }
 
         if change_in_node_manager {
-            if let Ok(info) = self.client.get_info().await {
-                let params = &info.node_info.latest_protocol_parameters().parameters;
+            if let Ok(node_info) = self.client.get_node_info().await {
+                let params = &node_info.info.latest_protocol_parameters().parameters;
 
                 *self.client.network_info.write().await = NetworkInfo {
                     protocol_parameters: params.clone(),
-                    tangle_time: info.node_info.status.relative_accepted_tangle_time,
+                    tangle_time: node_info.info.status.relative_accepted_tangle_time,
                 };
             } else if let Some(protocol_parameters) = protocol_parameters {
                 *self.client.network_info.write().await = NetworkInfo {
@@ -88,7 +88,7 @@ where
     }
 
     /// Update the authentication for a node.
-    pub async fn update_node_auth(&self, url: Url, auth: Option<NodeAuth>) -> crate::wallet::Result<()> {
+    pub async fn update_node_auth(&self, url: Url, auth: Option<NodeAuth>) -> Result<(), WalletError> {
         log::debug!("[update_node_auth]");
         let mut node_manager_builder = NodeManagerBuilder::from(&*self.client.node_manager.read().await);
 

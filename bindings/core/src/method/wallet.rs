@@ -28,8 +28,8 @@ use iota_sdk::{
     },
     wallet::{
         BeginStakingParams, ClientOptions, ConsolidationParams, CreateAccountParams, CreateDelegationParams,
-        CreateNativeTokenParams, FilterOptions, MintNftParams, OutputParams, OutputsToClaim, SendNativeTokenParams,
-        SendNftParams, SendParams, SyncOptions, TransactionOptions,
+        CreateNativeTokenParams, FilterOptions, MintNftParams, OutputParams, OutputsToClaim, SendManaParams,
+        SendNativeTokenParams, SendNftParams, SendParams, SyncOptions, TransactionOptions,
     },
     U256,
 };
@@ -315,6 +315,13 @@ pub enum WalletMethod {
         #[serde(default)]
         options: Option<TransactionOptions>,
     },
+    /// Prepare to send mana.
+    /// Expected response: [`PreparedTransaction`](crate::Response::PreparedTransaction)
+    PrepareSendMana {
+        params: SendManaParams,
+        #[serde(default)]
+        options: Option<TransactionOptions>,
+    },
     /// Prepare to send native tokens.
     /// Expected response: [`PreparedTransaction`](crate::Response::PreparedTransaction)
     PrepareSendNativeTokens {
@@ -404,7 +411,6 @@ pub enum WalletMethod {
     //     options: ParticipationEventRegistrationOptions,
     // },
     /// Checks the transaction state for a provided transaction id until it's accepted. Interval in milliseconds.
-    /// Returns the block id that contains this transaction.
     /// Expected response: [`BlockId`](crate::Response::BlockId)
     #[serde(rename_all = "camelCase")]
     WaitForTransactionAcceptance {

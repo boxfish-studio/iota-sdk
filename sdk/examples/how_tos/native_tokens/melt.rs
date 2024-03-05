@@ -16,13 +16,13 @@
 //! cargo run --release --all-features --example melt_native_token [TOKEN_ID]
 //! ```
 
-use iota_sdk::{types::block::output::TokenId, wallet::Result, Wallet};
+use iota_sdk::{types::block::output::TokenId, Wallet};
 
 // The amount of native tokens to melt
 const MELT_AMOUNT: u64 = 10;
 
 #[tokio::main]
-async fn main() -> Result<()> {
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // This example uses secrets in environment variables for simplicity which should not be done in production.
     dotenvy::dotenv().ok();
 
@@ -62,14 +62,14 @@ async fn main() -> Result<()> {
     let transaction = wallet.melt_native_token(token_id, MELT_AMOUNT, None).await?;
     println!("Transaction sent: {}", transaction.transaction_id);
 
-    let block_id = wallet
+    wallet
         .wait_for_transaction_acceptance(&transaction.transaction_id, None, None)
         .await?;
 
     println!(
-        "Tx accepted in block: {}/block/{}",
+        "Tx accepted: {}/transactions/{}",
         std::env::var("EXPLORER_URL").unwrap(),
-        block_id
+        transaction.transaction_id
     );
 
     let balance = wallet.sync(None).await?;

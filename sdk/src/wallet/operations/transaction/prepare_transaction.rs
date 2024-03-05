@@ -6,21 +6,17 @@ use packable::bounded::TryIntoBoundedU16Error;
 
 use crate::{
     client::{api::PreparedTransactionData, secret::SecretManage},
-    types::block::{input::INPUT_COUNT_MAX, output::Output},
-    wallet::{operations::transaction::TransactionOptions, Wallet},
+    types::block::{input::INPUT_COUNT_MAX, output::Output, payload::PayloadError},
+    wallet::{operations::transaction::TransactionOptions, Wallet, WalletError},
 };
 
-impl<S: 'static + SecretManage> Wallet<S>
-where
-    crate::wallet::Error: From<S::Error>,
-    crate::client::Error: From<S::Error>,
-{
+impl<S: 'static + SecretManage> Wallet<S> {
     /// Get inputs and build the transaction
     pub async fn prepare_transaction(
         &self,
         outputs: impl Into<Vec<Output>> + Send,
         options: impl Into<Option<TransactionOptions>> + Send,
-    ) -> crate::wallet::Result<PreparedTransactionData> {
+    ) -> Result<PreparedTransactionData, WalletError> {
         log::debug!("[TRANSACTION] prepare_transaction");
         let options = options.into().unwrap_or_default();
         let outputs = outputs.into();
@@ -33,9 +29,9 @@ where
         }
 
         if options.required_inputs.len() as u16 > INPUT_COUNT_MAX {
-            return Err(crate::types::block::Error::InvalidInputCount(
-                TryIntoBoundedU16Error::Truncated(options.required_inputs.len()),
-            ))?;
+            return Err(PayloadError::InputCount(TryIntoBoundedU16Error::Truncated(
+                options.required_inputs.len(),
+            )))?;
         }
 
         let prepared_transaction_data = self.select_inputs(outputs, options).await?;

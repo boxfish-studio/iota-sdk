@@ -12,10 +12,10 @@
 //! cargo run --release --all-features --example create_account_output
 //! ```
 
-use iota_sdk::{wallet::Result, Wallet};
+use iota_sdk::Wallet;
 
 #[tokio::main]
-async fn main() -> Result<()> {
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
     //  This example uses secrets in environment variables for simplicity which should not be done in production.
     dotenvy::dotenv().ok();
 
@@ -43,13 +43,14 @@ async fn main() -> Result<()> {
     let transaction = wallet.create_account_output(None, None).await?;
     println!("Transaction sent: {}", transaction.transaction_id);
 
-    let block_id = wallet
+    wallet
         .wait_for_transaction_acceptance(&transaction.transaction_id, None, None)
         .await?;
+
     println!(
-        "Tx accepted in block: {}/block/{}",
+        "Tx accepted: {}/transactions/{}",
         std::env::var("EXPLORER_URL").unwrap(),
-        block_id
+        transaction.transaction_id
     );
 
     let balance = wallet.sync(None).await?;

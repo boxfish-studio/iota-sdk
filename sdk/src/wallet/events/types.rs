@@ -6,16 +6,14 @@ use serde::{Deserialize, Serialize, Serializer};
 
 use crate::{
     client::api::PreparedTransactionDataDto,
-    types::{
-        api::core::OutputWithMetadataResponse,
-        block::{
-            address::Bech32Address,
-            payload::signed_transaction::{dto::SignedTransactionPayloadDto, TransactionId},
-        },
+    types::block::{
+        address::Bech32Address,
+        output::OutputWithMetadata,
+        payload::signed_transaction::{dto::SignedTransactionPayloadDto, TransactionId},
     },
     wallet::{
         types::{InclusionState, OutputData},
-        Error,
+        WalletError,
     },
 };
 
@@ -149,7 +147,7 @@ pub enum WalletEventType {
 }
 
 impl TryFrom<u8> for WalletEventType {
-    type Error = Error;
+    type Error = WalletError;
 
     fn try_from(value: u8) -> Result<Self, Self::Error> {
         let event_type = match value {
@@ -159,7 +157,7 @@ impl TryFrom<u8> for WalletEventType {
             2 => Self::SpentOutput,
             3 => Self::TransactionInclusion,
             4 => Self::TransactionProgress,
-            _ => return Err(Error::InvalidEventType(value)),
+            _ => return Err(WalletError::InvalidEventType(value)),
         };
         Ok(event_type)
     }
@@ -175,7 +173,7 @@ pub struct NewOutputEvent {
     pub transaction: Option<SignedTransactionPayloadDto>,
     /// The inputs for the transaction that created the output. Might be pruned and not available.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub transaction_inputs: Option<Vec<OutputWithMetadataResponse>>,
+    pub transaction_inputs: Option<Vec<OutputWithMetadata>>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
