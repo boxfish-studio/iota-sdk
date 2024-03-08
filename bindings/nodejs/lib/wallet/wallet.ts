@@ -30,8 +30,9 @@ import {
     ConsolidationParams,
     CreateDelegationTransaction,
     BeginStakingParams,
+    SendManaParams,
 } from '../types/wallet';
-import { Client, INode, Burn, PreparedTransactionData } from '../client';
+import { Client, Node, Burn, PreparedTransactionData } from '../client';
 import {
     Output,
     FoundryOutput,
@@ -59,7 +60,7 @@ import {
     CreateDelegationParams,
     PreparedCreateDelegationTransactionData,
 } from '../types/wallet';
-import { IAuth, IClientOptions, LedgerNanoStatus } from '../types/client';
+import { Auth, ClientOptions, LedgerNanoStatus } from '../types/client';
 import { SecretManager } from '../secret_manager';
 import { PreparedCreateDelegationTransaction } from '../types/wallet/create-delegation-transaction';
 
@@ -84,9 +85,12 @@ export class Wallet {
     /**
      * Backup the data to a Stronghold snapshot.
      */
-    async backup(destination: string, password: string): Promise<void> {
+    async backupToStrongholdSnapshot(
+        destination: string,
+        password: string,
+    ): Promise<void> {
         await this.methodHandler.callMethod({
-            name: 'backup',
+            name: 'backupToStrongholdSnapshot',
             data: {
                 destination,
                 password,
@@ -200,14 +204,14 @@ export class Wallet {
      * if ignore_if_coin_type_mismatch == true, client options coin type and accounts will not be restored if the cointype doesn't match
      * If a bech32 hrp is provided to ignore_if_bech32_hrp_mismatch, that doesn't match the one of the current address, the wallet will not be restored.
      */
-    async restoreBackup(
+    async restoreFromStrongholdSnapshot(
         source: string,
         password: string,
         ignoreIfCoinTypeMismatch?: boolean,
         ignoreIfBech32Mismatch?: string,
     ): Promise<void> {
         await this.methodHandler.callMethod({
-            name: 'restoreBackup',
+            name: 'restoreFromStrongholdSnapshot',
             data: {
                 source,
                 password,
@@ -220,7 +224,7 @@ export class Wallet {
     /**
      * Set ClientOptions.
      */
-    async setClientOptions(clientOptions: IClientOptions): Promise<void> {
+    async setClientOptions(clientOptions: ClientOptions): Promise<void> {
         await this.methodHandler.callMethod({
             name: 'setClientOptions',
             data: { clientOptions },
@@ -287,7 +291,7 @@ export class Wallet {
     /**
      * Update the authentication for the provided node.
      */
-    async updateNodeAuth(url: string, auth?: IAuth): Promise<void> {
+    async updateNodeAuth(url: string, auth?: Auth): Promise<void> {
         await this.methodHandler.callMethod({
             name: 'updateNodeAuth',
             data: { url, auth },
@@ -734,7 +738,7 @@ export class Wallet {
      * @param eventType The type of events to get.
      */
     async getParticipationEventIds(
-        node: INode,
+        node: Node,
         eventType?: ParticipationEventType,
     ): Promise<ParticipationEventId[]> {
         const response = await this.methodHandler.callMethod({
@@ -1459,17 +1463,17 @@ export class Wallet {
     }
 
     /**
-     * Send a transaction.
+     * Send outputs in a transaction.
      *
-     * @param outputs Outputs to use in the transaction.
-     * @param options Additional transaction options.
-     * @returns The transaction data.
+     * @param outputs The outputs to send.
+     * @param transactionOptions Additional transaction options.
+     * @returns The sent transaction.
      */
-    async sendTransaction(
+    async sendOutputs(
         outputs: Output[],
         options?: TransactionOptions,
     ): Promise<TransactionWithMetadata> {
-        return (await this.prepareTransaction(outputs, options)).send();
+        return (await this.prepareSendOutputs(outputs, options)).send();
     }
 
     /**
@@ -1479,12 +1483,12 @@ export class Wallet {
      * @param options Additional transaction options.
      * @returns The prepared transaction data.
      */
-    async prepareTransaction(
+    async prepareSendOutputs(
         outputs: Output[],
         options?: TransactionOptions,
     ): Promise<PreparedTransaction> {
         const response = await this.methodHandler.callMethod({
-            name: 'prepareTransaction',
+            name: 'prepareSendOutputs',
             data: {
                 outputs,
                 options,
@@ -1518,15 +1522,14 @@ export class Wallet {
     }
 
     /**
-     * Checks the transaction state for a provided transaction id until it's accepted. Interval in milliseconds. Returns the block id that
-     * contains this transaction.
+     * Checks the transaction state for a provided transaction id until it's accepted. Interval in milliseconds.
      */
     async waitForTransactionAcceptance(
         transactionId: TransactionId,
         interval?: number,
         maxAttempts?: number,
-    ): Promise<string> {
-        const response = await this.methodHandler.callMethod({
+    ): Promise<void> {
+        await this.methodHandler.callMethod({
             name: 'waitForTransactionAcceptance',
             data: {
                 transactionId,
@@ -1534,7 +1537,6 @@ export class Wallet {
                 maxAttempts,
             },
         });
-        return JSON.parse(response).payload;
     }
 
     /**
@@ -1553,18 +1555,9 @@ export class Wallet {
         if (typeof amount === 'bigint') {
             amount = amount.toString(10);
         }
-        const response = await this.methodHandler.callMethod({
-            name: 'send',
-            data: {
-                amount,
-                address,
-                options: transactionOptions,
-            },
-        });
-        const parsed = JSON.parse(
-            response,
-        ) as Response<TransactionWithMetadata>;
-        return plainToInstance(TransactionWithMetadata, parsed.payload);
+        return (
+            await this.prepareSend([{ address, amount }], transactionOptions)
+        ).send();
     }
 
     /**
@@ -1578,22 +1571,7 @@ export class Wallet {
         params: SendParams[],
         transactionOptions?: TransactionOptions,
     ): Promise<TransactionWithMetadata> {
-        for (let i = 0; i < params.length; i++) {
-            if (typeof params[i].amount === 'bigint') {
-                params[i].amount = params[i].amount.toString(10);
-            }
-        }
-        const response = await this.methodHandler.callMethod({
-            name: 'sendWithParams',
-            data: {
-                params,
-                options: transactionOptions,
-            },
-        });
-        const parsed = JSON.parse(
-            response,
-        ) as Response<TransactionWithMetadata>;
-        return plainToInstance(TransactionWithMetadata, parsed.payload);
+        return (await this.prepareSend(params, transactionOptions)).send();
     }
 
     /**
@@ -1681,28 +1659,45 @@ export class Wallet {
     }
 
     /**
-     * Send outputs in a transaction.
+     * Send mana.
      *
-     * @param outputs The outputs to send.
+     * @param params Amount, Address, and Return Strategy.
      * @param transactionOptions Additional transaction options.
      * @returns The sent transaction.
      */
-    async sendOutputs(
-        outputs: Output[],
+    async sendMana(
+        params: SendManaParams,
         transactionOptions?: TransactionOptions,
     ): Promise<TransactionWithMetadata> {
+        return (await this.prepareSendMana(params, transactionOptions)).send();
+    }
+
+    /**
+     * Prepare to send mana.
+     *
+     * @param params Amount, Address, and Return Strategy.
+     * @param transactionOptions Additional transaction options.
+     * @returns The prepared transaction.
+     */
+    async prepareSendMana(
+        params: SendManaParams,
+        transactionOptions?: TransactionOptions,
+    ): Promise<PreparedTransaction> {
         const response = await this.methodHandler.callMethod({
-            name: 'sendOutputs',
+            name: 'prepareSendMana',
             data: {
-                outputs,
+                params,
                 options: transactionOptions,
             },
         });
 
         const parsed = JSON.parse(
             response,
-        ) as Response<TransactionWithMetadata>;
-        return plainToInstance(TransactionWithMetadata, parsed.payload);
+        ) as Response<PreparedTransactionData>;
+        return new PreparedTransaction(
+            plainToInstance(PreparedTransactionData, parsed.payload),
+            this,
+        );
     }
 
     /**

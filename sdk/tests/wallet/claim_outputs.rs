@@ -2,11 +2,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use iota_sdk::{
+    client::api::options::TransactionOptions,
     types::block::output::{
         unlock_condition::{AddressUnlockCondition, ExpirationUnlockCondition},
         BasicOutputBuilder, NativeToken, NftId, NftOutputBuilder, UnlockCondition,
     },
-    wallet::{CreateNativeTokenParams, OutputsToClaim, Result, SendNativeTokenParams, SendParams, TransactionOptions},
+    wallet::{CreateNativeTokenParams, OutputsToClaim, SendNativeTokenParams, SendParams},
     U256,
 };
 use pretty_assertions::assert_eq;
@@ -15,7 +16,7 @@ use crate::wallet::common::{make_wallet, request_funds, setup, tear_down};
 
 #[ignore]
 #[tokio::test]
-async fn claim_2_basic_micro_outputs() -> Result<()> {
+async fn claim_2_basic_micro_outputs() -> Result<(), Box<dyn std::error::Error>> {
     let storage_path_0 = "test-storage/claim_2_basic_micro_outputs_0";
     let storage_path_1 = "test-storage/claim_2_basic_micro_outputs_1";
     setup(storage_path_0)?;
@@ -72,7 +73,7 @@ async fn claim_2_basic_micro_outputs() -> Result<()> {
 
 #[ignore]
 #[tokio::test]
-async fn claim_1_of_2_basic_outputs() -> Result<()> {
+async fn claim_1_of_2_basic_outputs() -> Result<(), Box<dyn std::error::Error>> {
     let storage_path_0 = "test-storage/claim_1_of_2_basic_outputs_0";
     let storage_path_1 = "test-storage/claim_1_of_2_basic_outputs_1";
     setup(storage_path_0)?;
@@ -129,7 +130,7 @@ async fn claim_1_of_2_basic_outputs() -> Result<()> {
 
 #[ignore]
 #[tokio::test]
-async fn claim_2_basic_outputs_no_outputs_in_claim_account() -> Result<()> {
+async fn claim_2_basic_outputs_no_outputs_in_claim_account() -> Result<(), Box<dyn std::error::Error>> {
     let storage_path_0 = "test-storage/claim_2_basic_outputs_no_outputs_in_claim_account_0";
     let storage_path_1 = "test-storage/claim_2_basic_outputs_no_outputs_in_claim_account_1";
     setup(storage_path_0)?;
@@ -185,7 +186,7 @@ async fn claim_2_basic_outputs_no_outputs_in_claim_account() -> Result<()> {
 
 #[ignore]
 #[tokio::test]
-async fn claim_2_native_tokens() -> Result<()> {
+async fn claim_2_native_tokens() -> Result<(), Box<dyn std::error::Error>> {
     let storage_path_0 = "test-storage/claim_2_native_tokens_0";
     let storage_path_1 = "test-storage/claim_2_native_tokens_1";
     setup(storage_path_0)?;
@@ -277,7 +278,7 @@ async fn claim_2_native_tokens() -> Result<()> {
 
 #[ignore]
 #[tokio::test]
-async fn claim_2_native_tokens_no_outputs_in_claim_account() -> Result<()> {
+async fn claim_2_native_tokens_no_outputs_in_claim_account() -> Result<(), Box<dyn std::error::Error>> {
     let storage_path_0 = "test-storage/claim_2_native_tokens_no_outputs_in_claim_account_0";
     let storage_path_1 = "test-storage/claim_2_native_tokens_no_outputs_in_claim_account_1";
     setup(storage_path_0)?;
@@ -384,7 +385,7 @@ async fn claim_2_native_tokens_no_outputs_in_claim_account() -> Result<()> {
 
 #[ignore]
 #[tokio::test]
-async fn claim_2_nft_outputs() -> Result<()> {
+async fn claim_2_nft_outputs() -> Result<(), Box<dyn std::error::Error>> {
     let storage_path_0 = "test-storage/claim_2_nft_outputs_0";
     let storage_path_1 = "test-storage/claim_2_nft_outputs_1";
     setup(storage_path_0)?;
@@ -446,7 +447,7 @@ async fn claim_2_nft_outputs() -> Result<()> {
 
 #[ignore]
 #[tokio::test]
-async fn claim_2_nft_outputs_no_outputs_in_claim_account() -> Result<()> {
+async fn claim_2_nft_outputs_no_outputs_in_claim_account() -> Result<(), Box<dyn std::error::Error>> {
     let storage_path_0 = "test-storage/claim_2_nft_outputs_no_outputs_in_claim_wallet_0";
     let storage_path_1 = "test-storage/claim_2_nft_outputs_no_outputs_in_claim_wallet_1";
     setup(storage_path_0)?;
@@ -507,7 +508,7 @@ async fn claim_2_nft_outputs_no_outputs_in_claim_account() -> Result<()> {
 
 #[ignore]
 #[tokio::test]
-async fn claim_basic_micro_output_error() -> Result<()> {
+async fn claim_basic_micro_output_error() -> Result<(), Box<dyn std::error::Error>> {
     let storage_path_0 = "test-storage/claim_basic_micro_output_error_0";
     let storage_path_1 = "test-storage/claim_basic_micro_output_error_1";
     setup(storage_path_0)?;
@@ -540,7 +541,10 @@ async fn claim_basic_micro_output_error() -> Result<()> {
     let result = wallet_1
         .claim_outputs(wallet_1.claimable_outputs(OutputsToClaim::MicroTransactions).await?)
         .await;
-    assert!(matches!(result, Err(iota_sdk::wallet::Error::InsufficientFunds { .. })));
+    assert!(matches!(
+        result,
+        Err(iota_sdk::wallet::WalletError::InsufficientFunds { .. })
+    ));
 
     tear_down(storage_path_0)?;
     tear_down(storage_path_1)?;

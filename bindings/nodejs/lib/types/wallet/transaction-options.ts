@@ -4,14 +4,13 @@
 import {
     AccountAddress,
     AccountId,
+    Address,
     Bech32Address,
-    ContextInput,
     OutputId,
 } from '../block';
 import { TaggedDataPayload } from '../block/payload/tagged';
 import { Burn } from '../client';
 import { u256, HexEncodedString, NumericString, u64 } from '../utils';
-import { Bip44Address } from './address';
 
 /** Options for creating a transaction. */
 export interface TransactionOptions {
@@ -19,11 +18,9 @@ export interface TransactionOptions {
     remainderValueStrategy?: RemainderValueStrategy;
     /** An optional tagged data payload. */
     taggedDataPayload?: TaggedDataPayload;
-    /** Transaction context inputs to include. */
-    contextInputs?: ContextInput[];
     /** Inputs that must be used for the transaction. */
     requiredInputs?: OutputId[];
-    /** Specifies what needs to be burned during input selection. */
+    /** Specifies what needs to be burned in the transaction. */
     burn?: Burn;
     /** Optional note, that is only stored locally. */
     note?: string;
@@ -31,8 +28,6 @@ export interface TransactionOptions {
     allowMicroAmount?: boolean;
     /** Whether to allow the selection of additional inputs for this transaction. */
     allowAdditionalInputSelection?: boolean;
-    /** Transaction capabilities. */
-    capabilities?: HexEncodedString;
     /** Mana allotments for the transaction. */
     manaAllotments?: { [account_id: AccountId]: u64 };
     /** Optional block issuer to which the transaction will have required mana allotted. */
@@ -56,7 +51,7 @@ export type ReuseAddress = {
 export type CustomAddress = {
     /** The name of the strategy. */
     strategy: 'CustomAddress';
-    value: Bip44Address;
+    value: Address;
 };
 
 /** Options for creating Native Tokens. */

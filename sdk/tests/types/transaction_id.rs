@@ -3,13 +3,7 @@
 
 use core::str::FromStr;
 
-use iota_sdk::types::{
-    block::payload::{
-        signed_transaction::{dto::SignedTransactionPayloadDto, SignedTransactionPayload, TransactionId},
-        Payload,
-    },
-    TryFromDto,
-};
+use iota_sdk::types::block::payload::signed_transaction::TransactionId;
 use packable::PackableExt;
 use pretty_assertions::assert_eq;
 
@@ -51,7 +45,7 @@ fn pack_unpack_valid() {
 
     assert_eq!(
         transaction_id,
-        PackableExt::unpack_verified(packed_transaction_id.as_slice(), &()).unwrap()
+        PackableExt::unpack_bytes_verified(packed_transaction_id.as_slice(), &()).unwrap()
     );
 }
 

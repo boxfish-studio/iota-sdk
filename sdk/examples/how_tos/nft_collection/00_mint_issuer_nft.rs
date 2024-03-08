@@ -19,12 +19,12 @@ use iota_sdk::{
         output::{feature::MetadataFeature, NftId, Output, OutputId},
         payload::signed_transaction::TransactionId,
     },
-    wallet::{MintNftParams, Result},
+    wallet::MintNftParams,
     Wallet,
 };
 
 #[tokio::main]
-async fn main() -> Result<()> {
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // This example uses secrets in environment variables for simplicity which should not be done in production.
     dotenvy::dotenv().ok();
 
@@ -72,20 +72,21 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
-async fn wait_for_inclusion(transaction_id: &TransactionId, wallet: &Wallet) -> Result<()> {
+async fn wait_for_inclusion(transaction_id: &TransactionId, wallet: &Wallet) -> Result<(), Box<dyn std::error::Error>> {
     println!(
         "Transaction sent: {}/transaction/{}",
         std::env::var("EXPLORER_URL").unwrap(),
         transaction_id
     );
-    // Wait for transaction to get accepted
-    let block_id = wallet
+    wallet
         .wait_for_transaction_acceptance(transaction_id, None, None)
         .await?;
+
     println!(
-        "Tx accepted in block: {}/block/{}",
+        "Tx accepted: {}/transactions/{}",
         std::env::var("EXPLORER_URL").unwrap(),
-        block_id
+        transaction_id
     );
+
     Ok(())
 }

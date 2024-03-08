@@ -1,6 +1,8 @@
 // Copyright 2022 IOTA Stiftung
 // SPDX-License-Identifier: Apache-2.0
 
+use core::cmp::Ordering;
+
 use crate::types::block::{
     output::{
         AccountOutput, AnchorOutput, BasicOutput, ChainId, DelegationOutput, FoundryOutput, NftOutput, Output,
@@ -130,9 +132,11 @@ impl BasicOutput {
             return Err(TransactionFailureReason::BlockIssuerNotExpired);
         }
 
-        if let Some(issuer) = next_state.immutable_features().issuer() {
-            if !context.unlocked_addresses.contains(issuer.address()) {
-                return Err(TransactionFailureReason::IssuerFeatureNotUnlocked);
+        if context.unlocks.is_some() {
+            if let Some(issuer) = next_state.immutable_features().issuer() {
+                if !context.unlocked_addresses.contains(issuer.address()) {
+                    return Err(TransactionFailureReason::IssuerFeatureNotUnlocked);
+                }
             }
         }
 
@@ -151,18 +155,32 @@ impl StateTransitionVerifier for AccountOutput {
         }
 
         if let Some(block_issuer) = next_state.features().block_issuer() {
-            let past_bounded_slot_index = context
+            let past_bounded_slot = context
                 .protocol_parameters
                 .past_bounded_slot(context.commitment_context_input.unwrap());
 
-            if block_issuer.expiry_slot() < past_bounded_slot_index {
+            if block_issuer.expiry_slot() < past_bounded_slot {
                 return Err(TransactionFailureReason::BlockIssuerExpiryTooEarly);
             }
         }
+        if let Some(staking) = next_state.features().staking() {
+            let past_bounded_epoch = context
+                .protocol_parameters
+                .past_bounded_epoch(context.commitment_context_input.unwrap());
 
-        if let Some(issuer) = next_state.immutable_features().issuer() {
-            if !context.unlocked_addresses.contains(issuer.address()) {
-                return Err(TransactionFailureReason::IssuerFeatureNotUnlocked);
+            if staking.start_epoch() != past_bounded_epoch {
+                return Err(TransactionFailureReason::StakingStartEpochInvalid);
+            }
+            if staking.end_epoch() < past_bounded_epoch + context.protocol_parameters.staking_unbonding_period {
+                return Err(TransactionFailureReason::StakingEndEpochTooEarly);
+            }
+        }
+
+        if context.unlocks.is_some() {
+            if let Some(issuer) = next_state.immutable_features().issuer() {
+                if !context.unlocked_addresses.contains(issuer.address()) {
+                    return Err(TransactionFailureReason::IssuerFeatureNotUnlocked);
+                }
             }
         }
 
@@ -170,22 +188,67 @@ impl StateTransitionVerifier for AccountOutput {
     }
 
     fn transition(
-        _current_output_id: &OutputId,
+        current_output_id: &OutputId,
         current_state: &Self,
         _next_output_id: &OutputId,
         next_state: &Self,
         context: &SemanticValidationContext<'_>,
     ) -> Result<(), TransactionFailureReason> {
+        if current_state.immutable_features() != next_state.immutable_features() {
+            return Err(TransactionFailureReason::ChainOutputImmutableFeaturesChanged);
+        }
+
+        // TODO update when TIP is updated
+        // // Governance transition.
+        // if current_state.amount != next_state.amount
+        //     || current_state.foundry_counter != next_state.foundry_counter
+        // {
+        //     return Err(StateTransitionError::MutatedFieldWithoutRights);
+        // }
+
+        // // State transition.
+        // if current_state.features.metadata() != next_state.features.metadata() {
+        //     return Err(StateTransitionError::MutatedFieldWithoutRights);
+        // }
+
+        let created_foundries = context.transaction.outputs().iter().filter_map(|output| {
+            if let Output::Foundry(foundry) = output {
+                if foundry.account_address().account_id() == next_state.account_id()
+                    && !context.input_chains.contains_key(&foundry.chain_id())
+                {
+                    Some(foundry)
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+        });
+
+        let mut created_foundries_count = 0;
+
+        for foundry in created_foundries {
+            created_foundries_count += 1;
+
+            if foundry.serial_number() != current_state.foundry_counter() + created_foundries_count {
+                return Err(TransactionFailureReason::FoundrySerialInvalid);
+            }
+        }
+
+        if current_state.foundry_counter() + created_foundries_count != next_state.foundry_counter() {
+            return Err(TransactionFailureReason::AccountInvalidFoundryCounter);
+        }
+
         match (
             current_state.features().block_issuer(),
             next_state.features().block_issuer(),
         ) {
             (None, Some(block_issuer_output)) => {
-                let past_bounded_slot_index = context
+                let past_bounded_slot = context
                     .protocol_parameters
                     .past_bounded_slot(context.commitment_context_input.unwrap());
 
-                if block_issuer_output.expiry_slot() < past_bounded_slot_index {
+                if block_issuer_output.expiry_slot() < past_bounded_slot {
                     return Err(TransactionFailureReason::BlockIssuerExpiryTooEarly);
                 }
             }
@@ -198,31 +261,96 @@ impl StateTransitionVerifier for AccountOutput {
             }
             (Some(block_issuer_input), Some(block_issuer_output)) => {
                 let commitment_index = context.commitment_context_input.unwrap();
-                let past_bounded_slot_index = context.protocol_parameters.past_bounded_slot(commitment_index);
+                let past_bounded_slot = context.protocol_parameters.past_bounded_slot(commitment_index);
 
                 if block_issuer_input.expiry_slot() >= commitment_index.slot_index() {
                     if block_issuer_input.expiry_slot() != block_issuer_output.expiry_slot()
-                        && block_issuer_input.expiry_slot() < past_bounded_slot_index
+                        && block_issuer_input.expiry_slot() < past_bounded_slot
                     {
                         return Err(TransactionFailureReason::BlockIssuerNotExpired);
                     }
-                } else if block_issuer_output.expiry_slot() < past_bounded_slot_index {
+                } else if block_issuer_output.expiry_slot() < past_bounded_slot {
                     return Err(TransactionFailureReason::BlockIssuerExpiryTooEarly);
                 }
             }
             _ => {}
         }
 
-        Self::transition_inner(
-            current_state,
-            next_state,
-            &context.input_chains,
-            context.transaction.outputs(),
-        )
+        match (current_state.features().staking(), next_state.features().staking()) {
+            (None, Some(staking_output)) => {
+                let past_bounded_epoch = context
+                    .protocol_parameters
+                    .past_bounded_epoch(context.commitment_context_input.unwrap());
+
+                if staking_output.start_epoch() != past_bounded_epoch {
+                    return Err(TransactionFailureReason::StakingStartEpochInvalid);
+                }
+                if staking_output.end_epoch()
+                    < past_bounded_epoch + context.protocol_parameters.staking_unbonding_period
+                {
+                    return Err(TransactionFailureReason::StakingEndEpochTooEarly);
+                }
+            }
+            (Some(staking_input), None) => {
+                let future_bounded_epoch = context
+                    .protocol_parameters
+                    .future_bounded_epoch(context.commitment_context_input.unwrap());
+
+                if staking_input.end_epoch() >= future_bounded_epoch {
+                    return Err(TransactionFailureReason::StakingFeatureRemovedBeforeUnbonding);
+                } else if context
+                    .mana_rewards
+                    .as_ref()
+                    .is_some_and(|r| !r.contains_key(current_output_id))
+                    || !context.reward_context_inputs.contains_key(current_output_id)
+                {
+                    return Err(TransactionFailureReason::StakingRewardClaimingInvalid);
+                }
+            }
+            (Some(staking_input), Some(staking_output)) => {
+                let past_bounded_epoch = context
+                    .protocol_parameters
+                    .past_bounded_epoch(context.commitment_context_input.unwrap());
+                let future_bounded_epoch = context
+                    .protocol_parameters
+                    .future_bounded_epoch(context.commitment_context_input.unwrap());
+
+                if staking_input.end_epoch() >= future_bounded_epoch {
+                    if staking_input.staked_amount() != staking_output.staked_amount()
+                        || staking_input.start_epoch() != staking_output.start_epoch()
+                        || staking_input.fixed_cost() != staking_output.fixed_cost()
+                    {
+                        return Err(TransactionFailureReason::StakingFeatureModifiedBeforeUnbonding);
+                    }
+                    if staking_input.end_epoch() != staking_output.end_epoch()
+                        && staking_input.end_epoch()
+                            < past_bounded_epoch + context.protocol_parameters.staking_unbonding_period
+                    {
+                        return Err(TransactionFailureReason::StakingEndEpochTooEarly);
+                    }
+                } else if (staking_input.staked_amount() != staking_output.staked_amount()
+                    || staking_input.start_epoch() != staking_output.start_epoch()
+                    || staking_input.fixed_cost() != staking_output.fixed_cost())
+                    && (staking_input.start_epoch() != past_bounded_epoch
+                        || staking_input.end_epoch()
+                            < past_bounded_epoch + context.protocol_parameters.staking_unbonding_period
+                        || context
+                            .mana_rewards
+                            .as_ref()
+                            .is_some_and(|r| !r.contains_key(current_output_id))
+                        || !context.reward_context_inputs.contains_key(current_output_id))
+                {
+                    return Err(TransactionFailureReason::StakingRewardClaimingInvalid);
+                }
+            }
+            _ => {}
+        }
+
+        Ok(())
     }
 
     fn destruction(
-        _output_id: &OutputId,
+        output_id: &OutputId,
         current_state: &Self,
         context: &SemanticValidationContext<'_>,
     ) -> Result<(), TransactionFailureReason> {
@@ -236,6 +364,22 @@ impl StateTransitionVerifier for AccountOutput {
         if let Some(block_issuer) = current_state.features().block_issuer() {
             if block_issuer.expiry_slot() >= context.commitment_context_input.unwrap().slot_index() {
                 return Err(TransactionFailureReason::BlockIssuerNotExpired);
+            }
+        }
+        if let Some(staking) = current_state.features().staking() {
+            let future_bounded_epoch = context
+                .protocol_parameters
+                .future_bounded_epoch(context.commitment_context_input.unwrap());
+
+            if staking.end_epoch() >= future_bounded_epoch {
+                return Err(TransactionFailureReason::StakingFeatureRemovedBeforeUnbonding);
+            } else if context
+                .mana_rewards
+                .as_ref()
+                .is_some_and(|r| !r.contains_key(output_id))
+                || !context.reward_context_inputs.contains_key(output_id)
+            {
+                return Err(TransactionFailureReason::StakingRewardClaimingInvalid);
             }
         }
 
@@ -253,9 +397,11 @@ impl StateTransitionVerifier for AnchorOutput {
             return Err(TransactionFailureReason::NewChainOutputHasNonZeroedId);
         }
 
-        if let Some(issuer) = next_state.immutable_features().issuer() {
-            if !context.unlocked_addresses.contains(issuer.address()) {
-                return Err(TransactionFailureReason::IssuerFeatureNotUnlocked);
+        if context.unlocks.is_some() {
+            if let Some(issuer) = next_state.immutable_features().issuer() {
+                if !context.unlocked_addresses.contains(issuer.address()) {
+                    return Err(TransactionFailureReason::IssuerFeatureNotUnlocked);
+                }
             }
         }
 
@@ -267,14 +413,32 @@ impl StateTransitionVerifier for AnchorOutput {
         current_state: &Self,
         _next_output_id: &OutputId,
         next_state: &Self,
-        context: &SemanticValidationContext<'_>,
+        _context: &SemanticValidationContext<'_>,
     ) -> Result<(), TransactionFailureReason> {
-        Self::transition_inner(
-            current_state,
-            next_state,
-            &context.input_chains,
-            context.transaction.outputs(),
-        )
+        if current_state.immutable_features() != next_state.immutable_features() {
+            return Err(TransactionFailureReason::ChainOutputImmutableFeaturesChanged);
+        }
+
+        if next_state.state_index() == current_state.state_index() + 1 {
+            // State transition.
+            if current_state.state_controller_address() != next_state.state_controller_address()
+                || current_state.governor_address() != next_state.governor_address()
+                || current_state.features().metadata() != next_state.features().metadata()
+            {
+                return Err(TransactionFailureReason::AnchorInvalidStateTransition);
+            }
+        } else if next_state.state_index() == current_state.state_index() {
+            // Governance transition.
+            if current_state.amount() != next_state.amount()
+                || current_state.features().state_metadata() != next_state.features().state_metadata()
+            {
+                return Err(TransactionFailureReason::AnchorInvalidGovernanceTransition);
+            }
+        } else {
+            return Err(TransactionFailureReason::AnchorInvalidStateTransition);
+        }
+
+        Ok(())
     }
 
     fn destruction(
@@ -338,13 +502,86 @@ impl StateTransitionVerifier for FoundryOutput {
         next_state: &Self,
         context: &SemanticValidationContext<'_>,
     ) -> Result<(), TransactionFailureReason> {
-        Self::transition_inner(
-            current_state,
-            next_state,
-            &context.input_native_tokens,
-            &context.output_native_tokens,
-            context.transaction.capabilities(),
-        )
+        if current_state.account_address() != next_state.account_address()
+            || current_state.serial_number() != next_state.serial_number()
+            || current_state.immutable_features() != next_state.immutable_features()
+        {
+            return Err(TransactionFailureReason::ChainOutputImmutableFeaturesChanged);
+        }
+
+        let token_id = next_state.token_id();
+        let input_tokens = context.input_native_tokens.get(&token_id).copied().unwrap_or_default();
+        let output_tokens = context.output_native_tokens.get(&token_id).copied().unwrap_or_default();
+        let TokenScheme::Simple(ref current_token_scheme) = current_state.token_scheme();
+        let TokenScheme::Simple(ref next_token_scheme) = next_state.token_scheme();
+
+        if current_token_scheme.maximum_supply() != next_token_scheme.maximum_supply() {
+            return Err(TransactionFailureReason::SimpleTokenSchemeMaximumSupplyChanged);
+        }
+
+        if current_token_scheme.minted_tokens() > next_token_scheme.minted_tokens()
+            || current_token_scheme.melted_tokens() > next_token_scheme.melted_tokens()
+        {
+            return Err(TransactionFailureReason::SimpleTokenSchemeMintedMeltedTokenDecrease);
+        }
+
+        match input_tokens.cmp(&output_tokens) {
+            Ordering::Less => {
+                // Mint
+
+                // This can't underflow as it is known that current_minted_tokens <= next_minted_tokens.
+                let minted_diff = next_token_scheme.minted_tokens() - current_token_scheme.minted_tokens();
+                // This can't underflow as it is known that input_tokens < output_tokens (Ordering::Less).
+                let token_diff = output_tokens - input_tokens;
+
+                if minted_diff != token_diff {
+                    return Err(TransactionFailureReason::NativeTokenSumUnbalanced);
+                }
+
+                if current_token_scheme.melted_tokens() != next_token_scheme.melted_tokens() {
+                    return Err(TransactionFailureReason::NativeTokenSumUnbalanced);
+                }
+            }
+            Ordering::Equal => {
+                // Transition
+
+                if current_token_scheme.minted_tokens() != next_token_scheme.minted_tokens()
+                    || current_token_scheme.melted_tokens() != next_token_scheme.melted_tokens()
+                {
+                    return Err(TransactionFailureReason::NativeTokenSumUnbalanced);
+                }
+            }
+            Ordering::Greater => {
+                // Melt / Burn
+
+                if current_token_scheme.melted_tokens() != next_token_scheme.melted_tokens()
+                    && current_token_scheme.minted_tokens() != next_token_scheme.minted_tokens()
+                {
+                    return Err(TransactionFailureReason::NativeTokenSumUnbalanced);
+                }
+
+                // This can't underflow as it is known that current_melted_tokens <= next_melted_tokens.
+                let melted_diff = next_token_scheme.melted_tokens() - current_token_scheme.melted_tokens();
+                // This can't underflow as it is known that input_tokens > output_tokens (Ordering::Greater).
+                let token_diff = input_tokens - output_tokens;
+
+                if melted_diff > token_diff {
+                    return Err(TransactionFailureReason::NativeTokenSumUnbalanced);
+                }
+
+                let burned_diff = token_diff - melted_diff;
+
+                if !burned_diff.is_zero()
+                    && !context
+                        .transaction
+                        .has_capability(TransactionCapabilityFlag::BurnNativeTokens)
+                {
+                    return Err(TransactionFailureReason::CapabilitiesNativeTokenBurningNotAllowed)?;
+                }
+            }
+        }
+
+        Ok(())
     }
 
     fn destruction(
@@ -389,9 +626,11 @@ impl StateTransitionVerifier for NftOutput {
             return Err(TransactionFailureReason::NewChainOutputHasNonZeroedId);
         }
 
-        if let Some(issuer) = next_state.immutable_features().issuer() {
-            if !context.unlocked_addresses.contains(issuer.address()) {
-                return Err(TransactionFailureReason::IssuerFeatureNotUnlocked);
+        if context.unlocks.is_some() {
+            if let Some(issuer) = next_state.immutable_features().issuer() {
+                if !context.unlocked_addresses.contains(issuer.address()) {
+                    return Err(TransactionFailureReason::IssuerFeatureNotUnlocked);
+                }
             }
         }
 
@@ -405,7 +644,11 @@ impl StateTransitionVerifier for NftOutput {
         next_state: &Self,
         _context: &SemanticValidationContext<'_>,
     ) -> Result<(), TransactionFailureReason> {
-        Self::transition_inner(current_state, next_state)
+        if current_state.immutable_features() != next_state.immutable_features() {
+            return Err(TransactionFailureReason::ChainOutputImmutableFeaturesChanged);
+        }
+
+        Ok(())
     }
 
     fn destruction(
@@ -462,15 +705,22 @@ impl StateTransitionVerifier for DelegationOutput {
         next_state: &Self,
         context: &SemanticValidationContext<'_>,
     ) -> Result<(), TransactionFailureReason> {
-        Self::transition_inner(current_state, next_state)?;
+        if !current_state.delegation_id().is_null() || next_state.delegation_id().is_null() {
+            return Err(TransactionFailureReason::DelegationOutputTransitionedTwice);
+        }
 
-        let protocol_parameters = &context.protocol_parameters;
+        if current_state.delegated_amount() != next_state.delegated_amount()
+            || current_state.start_epoch() != next_state.start_epoch()
+            || current_state.validator_address() != next_state.validator_address()
+        {
+            return Err(TransactionFailureReason::DelegationModified);
+        }
 
         let slot_commitment_id = context
             .commitment_context_input
             .ok_or(TransactionFailureReason::DelegationCommitmentInputMissing)?;
 
-        if next_state.end_epoch() != protocol_parameters.delegation_end_epoch(slot_commitment_id) {
+        if next_state.end_epoch() != context.protocol_parameters.delegation_end_epoch(slot_commitment_id) {
             return Err(TransactionFailureReason::DelegationEndEpochInvalid);
         }
 
@@ -482,7 +732,12 @@ impl StateTransitionVerifier for DelegationOutput {
         _current_state: &Self,
         context: &SemanticValidationContext<'_>,
     ) -> Result<(), TransactionFailureReason> {
-        if !context.mana_rewards.contains_key(output_id) || !context.reward_context_inputs.contains_key(output_id) {
+        if context
+            .mana_rewards
+            .as_ref()
+            .is_some_and(|r| !r.contains_key(output_id))
+            || !context.reward_context_inputs.contains_key(output_id)
+        {
             return Err(TransactionFailureReason::DelegationRewardInputMissing);
         }
 

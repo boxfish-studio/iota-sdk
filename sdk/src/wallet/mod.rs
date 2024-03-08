@@ -41,7 +41,7 @@ pub use self::operations::participation::{ParticipationEventWithNodes, Participa
 use self::types::TransactionWithMetadata;
 pub use self::{
     core::{Wallet, WalletBuilder},
-    error::Error,
+    error::WalletError,
     operations::{
         output_claiming::OutputsToClaim,
         output_consolidation::ConsolidationParams,
@@ -62,12 +62,12 @@ pub use self::{
                     mint_nfts::MintNftParams,
                 },
                 send::SendParams,
+                send_mana::SendManaParams,
                 send_native_tokens::SendNativeTokenParams,
                 send_nft::SendNftParams,
                 staking::begin::BeginStakingParams,
             },
             prepare_output::{Assets, Features, OutputParams, ReturnStrategy, StorageDeposit, Unlocks},
-            RemainderValueStrategy, TransactionOptions,
         },
     },
     types::OutputData,
@@ -76,15 +76,12 @@ use crate::{
     types::{
         api::core::OutputWithMetadataResponse,
         block::{
-            output::{AccountId, AnchorId, DelegationId, FoundryId, NftId},
+            output::{AccountId, AnchorId, DelegationId, FoundryId, NftId, OutputWithMetadata},
             payload::signed_transaction::{SignedTransactionPayload, TransactionId},
         },
     },
     wallet::types::InclusionState,
 };
-
-/// The wallet Result type.
-pub type Result<T> = std::result::Result<T, Error>;
 
 /// Options to filter outputs
 #[derive(Debug, Default, Clone, Serialize, Deserialize, Eq, PartialEq)]
@@ -112,7 +109,7 @@ pub(crate) fn build_transaction_from_payload_and_inputs(
     tx_id: TransactionId,
     tx_payload: SignedTransactionPayload,
     inputs: Vec<OutputWithMetadataResponse>,
-) -> crate::wallet::Result<TransactionWithMetadata> {
+) -> Result<TransactionWithMetadata, WalletError> {
     Ok(TransactionWithMetadata {
         payload: tx_payload.clone(),
         block_id: inputs.first().map(|i| *i.metadata.block_id()),
@@ -127,6 +124,12 @@ pub(crate) fn build_transaction_from_payload_and_inputs(
         network_id: tx_payload.transaction().network_id(),
         incoming: true,
         note: None,
-        inputs,
+        inputs: inputs
+            .into_iter()
+            .map(|input| OutputWithMetadata {
+                output: input.output,
+                metadata: input.metadata,
+            })
+            .collect(),
     })
 }

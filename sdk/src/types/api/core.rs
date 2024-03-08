@@ -14,15 +14,23 @@ use crate::{
     types::block::{
         address::Bech32Address,
         core::Parents,
-        output::{Output, OutputId, OutputIdProof, OutputMetadata, OutputWithMetadata},
+        output::{Output, OutputId, OutputIdProof, OutputMetadata},
         payload::signed_transaction::TransactionId,
         protocol::{ProtocolParameters, ProtocolParametersHash},
         semantic::TransactionFailureReason,
         slot::{EpochIndex, SlotCommitment, SlotCommitmentId, SlotIndex},
-        BlockDto, BlockId,
+        BlockDto, BlockError, BlockId,
     },
     utils::serde::{option_string, string},
 };
+
+/// Response of GET /api/routes.
+/// The available API route groups of the node.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RoutesResponse {
+    pub routes: Vec<String>,
+}
 
 /// Response of GET /api/core/v3/info.
 /// General information about the node.
@@ -32,7 +40,6 @@ pub struct InfoResponse {
     pub name: String,
     pub version: String,
     pub status: StatusResponse,
-    pub metrics: MetricsResponse,
     pub protocol_parameters: ProtocolParametersMap,
     pub base_token: BaseTokenResponse,
 }
@@ -97,11 +104,10 @@ pub struct StatusResponse {
     pub pruning_epoch: EpochIndex,
 }
 
-/// Returned in [`InfoResponse`].
-/// Metric information about the node.
+/// Metrics information about the network.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct MetricsResponse {
+pub struct NetworkMetricsResponse {
     #[serde(with = "string")]
     pub blocks_per_second: f64,
     #[serde(with = "string")]
@@ -197,24 +203,24 @@ pub struct BaseTokenResponse {
 #[serde(rename_all = "camelCase")]
 pub struct ValidatorResponse {
     /// Account address of the validator.
-    address: Bech32Address,
+    pub address: Bech32Address,
     /// The epoch index until which the validator registered to stake.
-    staking_end_epoch: EpochIndex,
+    pub staking_end_epoch: EpochIndex,
     /// The total stake of the pool, including delegators.
     #[serde(with = "string")]
-    pool_stake: u64,
+    pub pool_stake: u64,
     /// The stake of a validator.
     #[serde(with = "string")]
-    validator_stake: u64,
+    pub validator_stake: u64,
     /// The fixed cost of the validator, which it receives as part of its Mana rewards.
     #[serde(with = "string")]
-    fixed_cost: u64,
+    pub fixed_cost: u64,
     /// Shows whether the validator was active recently.
-    active: bool,
+    pub active: bool,
     /// The latest protocol version the validator supported.
-    latest_supported_protocol_version: u8,
+    pub latest_supported_protocol_version: u8,
     /// The protocol hash of the latest supported protocol of the validator.
-    latest_supported_protocol_hash: ProtocolParametersHash,
+    pub latest_supported_protocol_hash: ProtocolParametersHash,
 }
 
 /// Response of GET /api/core/v3/blocks/validators.
@@ -224,13 +230,13 @@ pub struct ValidatorResponse {
 #[serde(rename_all = "camelCase")]
 pub struct ValidatorsResponse {
     /// List of registered validators ready for the next epoch.
-    stakers: Vec<ValidatorResponse>,
+    pub validators: Vec<ValidatorResponse>,
     /// The number of validators returned per one API request with pagination.
-    page_size: u32,
+    pub page_size: u32,
     /// The cursor that needs to be provided as cursor query parameter to request the next page. If empty, this was the
     /// last page.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    cursor: Option<String>,
+    pub cursor: Option<String>,
 }
 
 /// Response of GET /api/core/v3/rewards/{outputId}.
@@ -312,19 +318,15 @@ pub struct IssuanceBlockHeaderResponse {
 }
 
 impl IssuanceBlockHeaderResponse {
-    pub fn strong_parents<const MIN: u8, const MAX: u8>(
-        &self,
-    ) -> Result<Parents<MIN, MAX>, crate::types::block::Error> {
+    pub fn strong_parents<const MIN: u8, const MAX: u8>(&self) -> Result<Parents<MIN, MAX>, BlockError> {
         Parents::from_set(self.strong_parents.clone())
     }
 
-    pub fn weak_parents<const MIN: u8, const MAX: u8>(&self) -> Result<Parents<MIN, MAX>, crate::types::block::Error> {
+    pub fn weak_parents<const MIN: u8, const MAX: u8>(&self) -> Result<Parents<MIN, MAX>, BlockError> {
         Parents::from_set(self.weak_parents.clone())
     }
 
-    pub fn shallow_like_parents<const MIN: u8, const MAX: u8>(
-        &self,
-    ) -> Result<Parents<MIN, MAX>, crate::types::block::Error> {
+    pub fn shallow_like_parents<const MIN: u8, const MAX: u8>(&self) -> Result<Parents<MIN, MAX>, BlockError> {
         Parents::from_set(self.shallow_like_parents.clone())
     }
 }
@@ -484,38 +486,85 @@ pub struct BlockWithMetadataResponse {
     pub metadata: BlockMetadataResponse,
 }
 
-// TODO: needs to be aligned with TIP-48.
-// https://github.com/iotaledger/iota-sdk/issues/1921
 /// Response of GET /api/core/v3/outputs/{output_id}.
-/// An output and its metadata.
+/// Contains the generic [`Output`] with associated [`OutputIdProof`].
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct OutputWithMetadataResponse {
+pub struct OutputResponse {
     pub output: Output,
-    pub metadata: OutputMetadata,
+    pub output_id_proof: OutputIdProof,
 }
 
-impl From<&OutputWithMetadata> for OutputWithMetadataResponse {
-    fn from(value: &OutputWithMetadata) -> Self {
+impl From<&OutputWithMetadataResponse> for OutputResponse {
+    fn from(value: &OutputWithMetadataResponse) -> Self {
         Self {
             output: value.output().clone(),
-            metadata: value.metadata,
+            output_id_proof: value.output_id_proof().clone(),
         }
     }
 }
 
-impl From<OutputWithMetadata> for OutputWithMetadataResponse {
-    fn from(value: OutputWithMetadata) -> Self {
-        Self::from(&value)
+impl From<OutputWithMetadataResponse> for OutputResponse {
+    fn from(value: OutputWithMetadataResponse) -> Self {
+        Self {
+            output: value.output,
+            output_id_proof: value.output_id_proof,
+        }
     }
 }
 
-/// Response of GET /api/routes.
-/// The available API route groups of the node.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct RoutesResponse {
-    pub routes: Vec<String>,
+/// Contains the generic [`Output`] with associated [`OutputIdProof`] and [`OutputMetadata`].
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[cfg_attr(
+    feature = "serde",
+    derive(serde::Serialize, serde::Deserialize),
+    serde(rename_all = "camelCase")
+)]
+pub struct OutputWithMetadataResponse {
+    pub output: Output,
+    pub output_id_proof: OutputIdProof,
+    pub metadata: OutputMetadata,
+}
+
+impl OutputWithMetadataResponse {
+    /// Creates a new [`OutputWithMetadataResponse`].
+    pub fn new(output: Output, output_id_proof: OutputIdProof, metadata: OutputMetadata) -> Self {
+        Self {
+            output,
+            output_id_proof,
+            metadata,
+        }
+    }
+
+    /// Returns the [`Output`].
+    pub fn output(&self) -> &Output {
+        &self.output
+    }
+
+    /// Consumes self and returns the [`Output`].
+    pub fn into_output(self) -> Output {
+        self.output
+    }
+
+    /// Returns the [`OutputIdProof`].
+    pub fn output_id_proof(&self) -> &OutputIdProof {
+        &self.output_id_proof
+    }
+
+    /// Consumes self and returns the [`OutputIdProof`].
+    pub fn into_output_id_proof(self) -> OutputIdProof {
+        self.output_id_proof
+    }
+
+    /// Returns the [`OutputMetadata`].
+    pub fn metadata(&self) -> &OutputMetadata {
+        &self.metadata
+    }
+
+    /// Consumes self and returns the [`OutputMetadata`].
+    pub fn into_metadata(self) -> OutputMetadata {
+        self.metadata
+    }
 }
 
 /// Response of
@@ -548,12 +597,4 @@ pub struct UtxoChangesFullResponse {
 pub struct OutputWithId {
     pub output: Output,
     pub output_id: OutputId,
-}
-
-/// Contains the generic [`Output`] with associated [`OutputIdProof`].
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct OutputResponse {
-    pub output: Output,
-    pub output_id_proof: OutputIdProof,
 }

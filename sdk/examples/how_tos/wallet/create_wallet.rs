@@ -16,11 +16,11 @@ use iota_sdk::{
         secret::{stronghold::StrongholdSecretManager, SecretManager},
     },
     crypto::keys::{bip39::Mnemonic, bip44::Bip44},
-    wallet::{ClientOptions, Result, Wallet},
+    wallet::{ClientOptions, Wallet},
 };
 
 #[tokio::main]
-async fn main() -> Result<()> {
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // This example uses secrets in environment variables for simplicity which should not be done in production.
     dotenvy::dotenv().ok();
 
@@ -48,7 +48,7 @@ async fn main() -> Result<()> {
     let client_options = ClientOptions::new().with_node(&std::env::var("NODE_URL").unwrap())?;
 
     // Create the wallet
-    let wallet = Wallet::builder()
+    Wallet::builder()
         .with_secret_manager(SecretManager::Stronghold(secret_manager))
         .with_storage_path(&std::env::var("WALLET_DB_PATH").unwrap())
         .with_client_options(client_options)

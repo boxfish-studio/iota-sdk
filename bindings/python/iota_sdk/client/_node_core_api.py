@@ -3,8 +3,7 @@
 
 from typing import List, Optional, Union
 from abc import ABCMeta, abstractmethod
-
-from iota_sdk.client.responses import NodeInfoWrapper, InfoResponse, RoutesResponse, CongestionResponse, ManaRewardsResponse, CommitteeResponse, ValidatorResponse, ValidatorsResponse, IssuanceBlockHeaderResponse, BlockMetadataResponse, BlockWithMetadataResponse, OutputWithMetadataResponse, TransactionMetadataResponse, UtxoChangesResponse, UtxoChangesFullResponse
+from iota_sdk.client.responses import InfoResponse, NodeInfoResponse, NetworkMetricsResponse, RoutesResponse, CongestionResponse, ManaRewardsResponse, CommitteeResponse, ValidatorResponse, ValidatorsResponse, IssuanceBlockHeaderResponse, BlockMetadataResponse, BlockWithMetadataResponse, OutputResponse, OutputWithMetadataResponse, TransactionMetadataResponse, UtxoChangesResponse, UtxoChangesFullResponse
 from iota_sdk.types.block.block import Block
 from iota_sdk.types.block.id import BlockId
 from iota_sdk.types.common import HexStr, EpochIndex, SlotIndex
@@ -52,17 +51,22 @@ class NodeCoreAPI(metaclass=ABCMeta):
             'url': url
         })
 
-    # TODO: this is not strictly following the 2.0 Core API Spec (or maybe the TIP isn't updated yet)
-    # https://github.com/iotaledger/iota-sdk/issues/1921
-    def get_info(self) -> NodeInfoWrapper:
-        """Returns general information about the node together with its URL.
-        GET /api/core/v3/info
+    def get_routes(self) -> RoutesResponse:
+        """Returns the available API route groups of the node.
+        GET /api/routes
         """
-        return NodeInfoWrapper.from_dict(self._call_method('getInfo'))
+        return RoutesResponse.from_dict(self._call_method('getRoutes'))
 
-    # TODO: this is not strictly following the 2.0 Core API Spec (or maybe the TIP isn't updated yet)
-    # https://github.com/iotaledger/iota-sdk/issues/1921
-    def get_node_info(self, url: str, auth=None) -> InfoResponse:
+    def get_node_info(self) -> NodeInfoResponse:
+        """Returns general information about a node together with its URL.
+        GET /api/core/v3/info
+
+        Returns:
+            The node info with its URL.
+        """
+        return NodeInfoResponse.from_dict(self._call_method('getNodeInfo'))
+
+    def get_info(self, url: str, auth=None) -> InfoResponse:
         """Returns general information about the node.
         GET /api/core/v3/info
 
@@ -73,53 +77,37 @@ class NodeCoreAPI(metaclass=ABCMeta):
         Returns:
             The node info.
         """
-        return InfoResponse.from_dict(self._call_method('getNodeInfo', {
+        return InfoResponse.from_dict(self._call_method('getInfo', {
             'url': url,
             'auth': auth
         }))
 
-    # TODO: this should made be available
-    # https://github.com/iotaledger/iota-sdk/issues/1921
-    def get_routes(self) -> RoutesResponse:
-        """Returns the available API route groups of the node.
-        GET /api/routes
-        """
+    def get_network_metrics(self) -> NetworkMetricsResponse:
+        """Returns network metrics.
+        GET /api/core/v3/network/metrics
 
-    def call_plugin_route(self, base_plugin_path: str, method: str,
-                          endpoint: str, query_params: Optional[List[str]] = None, request: Optional[str] = None):
-        """Extension method which provides request methods for plugins.
-
-        Args:
-            base_plugin_path: The base path of the routes provided by the plugin.
-            method: The HTTP method.
-            endpoint: The endpoint to query provided by the plugin.
-            query_params: The parameters of the query.
-            request: The request object sent to the endpoint of the plugin.
+        Returns:
+            Network metrics.
         """
-        if query_params is None:
-            query_params = []
-        return self._call_method('callPluginRoute', {
-            'basePluginPath': base_plugin_path,
-            'method': method,
-            'endpoint': endpoint,
-            'queryParams': query_params,
-            'request': request,
-        })
+        return NetworkMetricsResponse.from_dict(
+            self._call_method('getNetworkMetrics'))
 
     # Accounts routes.
 
-    def get_account_congestion(self, account_id: HexStr) -> CongestionResponse:
+    def get_account_congestion(
+            self, account_id: HexStr, work_score: Optional[int] = None) -> CongestionResponse:
         """Checks if the account is ready to issue a block.
         GET /api/core/v3/accounts/{bech32Address}/congestion
         """
         return CongestionResponse.from_dict(self._call_method('getAccountCongestion', {
-            'accountId': account_id
+            'accountId': account_id,
+            'workScore': work_score
         }))
 
     # Rewards routes.
 
     def get_output_mana_rewards(
-            self, output_id: OutputId, slot_index: SlotIndex) -> ManaRewardsResponse:
+            self, output_id: OutputId, slot_index: Optional[SlotIndex] = None) -> ManaRewardsResponse:
         """Returns the total available Mana rewards of an account or delegation output decayed up to `epochEnd` index
         provided in the response.
         Note that rewards for an epoch only become available at the beginning of the next epoch. If the end epoch of a
@@ -133,22 +121,12 @@ class NodeCoreAPI(metaclass=ABCMeta):
             'slotIndex': slot_index
         }))
 
-    # Committee routes.
-
-    def get_committee(self, epoch_index: EpochIndex) -> CommitteeResponse:
-        """Returns the information of committee members at the given epoch index. If epoch index is not provided, the
-        current committee members are returned.
-        GET /api/core/v3/committee/?epochIndex
-        """
-        return CommitteeResponse.from_dict(self._call_method('getCommittee', {
-            'epochIndex': epoch_index
-        }))
-
     # Validators routes.
 
-    def get_validators(self, page_size, cursor) -> ValidatorsResponse:
-        """Returns information of all registered validators and if they are active.
-        GET JSON to /api/core/v3/validators
+    def get_validators(
+            self, page_size: Optional[int] = None, cursor: Optional[str] = None) -> ValidatorsResponse:
+        """Returns information of all stakers (registered validators) and if they are active, ordered by their holding stake.
+        GET /api/core/v3/validators
         """
         return ValidatorsResponse.from_dict(self._call_method('getValidators', {
             'pageSize': page_size,
@@ -156,11 +134,23 @@ class NodeCoreAPI(metaclass=ABCMeta):
         }))
 
     def get_validator(self, account_id: HexStr) -> ValidatorResponse:
-        """Return information about a validator.
+        """Return information about a staker (registered validator).
         GET /api/core/v3/validators/{bech32Address}
         """
         return ValidatorResponse.from_dict(self._call_method('getValidator', {
             'accountId': account_id
+        }))
+
+    # Committee routes.
+
+    def get_committee(
+            self, epoch_index: Optional[EpochIndex] = None) -> CommitteeResponse:
+        """Returns the information of committee members at the given epoch index. If epoch index is not provided, the
+        current committee members are returned.
+        GET /api/core/v3/committee/?epochIndex
+        """
+        return CommitteeResponse.from_dict(self._call_method('getCommittee', {
+            'epochIndex': epoch_index
         }))
 
     # Block routes.
@@ -174,7 +164,7 @@ class NodeCoreAPI(metaclass=ABCMeta):
 
     def post_block(self, block: Block) -> BlockId:
         """Returns the BlockId of the submitted block.
-        POST JSON to /api/core/v3/blocks
+        POST /api/core/v3/blocks
 
         Args:
             block: The block to post.
@@ -186,7 +176,7 @@ class NodeCoreAPI(metaclass=ABCMeta):
             'block': block
         })
 
-    def post_block_raw(self, block: Block) -> BlockId:
+    def post_block_raw(self, block_bytes: bytes) -> BlockId:
         """Returns the BlockId of the submitted block.
         POST /api/core/v3/blocks
 
@@ -194,7 +184,7 @@ class NodeCoreAPI(metaclass=ABCMeta):
             The corresponding block id of the block.
         """
         return self._call_method('postBlockRaw', {
-            'block': block
+            'blockBytes': block_bytes
         })
 
     def get_block(self, block_id: BlockId) -> Block:
@@ -244,10 +234,8 @@ class NodeCoreAPI(metaclass=ABCMeta):
 
     # UTXO routes.
 
-    # TODO: this should return `OutputResponse`, not OutputWithMetadataResponse
-    # https://github.com/iotaledger/iota-sdk/issues/1921
     def get_output(
-            self, output_id: Union[OutputId, HexStr]) -> OutputWithMetadataResponse:
+            self, output_id: Union[OutputId, HexStr]) -> OutputResponse:
         """Finds an output by its ID and returns it as object.
         GET /api/core/v3/outputs/{outputId}
 
@@ -256,12 +244,10 @@ class NodeCoreAPI(metaclass=ABCMeta):
         """
         output_id_str = output_id.output_id if isinstance(
             output_id, OutputId) else output_id
-        return OutputWithMetadataResponse.from_dict(self._call_method('getOutput', {
+        return OutputResponse.from_dict(self._call_method('getOutput', {
             'outputId': output_id_str
         }))
 
-    # TODO: this should be made available
-    # https://github.com/iotaledger/iota-sdk/issues/1921
     def get_output_raw(
             self, output_id: Union[OutputId, HexStr]) -> List[int]:
         """Finds an output by its ID and returns it as raw bytes.
@@ -296,7 +282,7 @@ class NodeCoreAPI(metaclass=ABCMeta):
         GET /api/core/v3/outputs/{outputId}/full
 
         Returns:
-            The corresponding output.
+            The corresponding output with its metadata.
         """
         output_id_str = output_id.output_id if isinstance(
             output_id, OutputId) else output_id
@@ -315,8 +301,6 @@ class NodeCoreAPI(metaclass=ABCMeta):
             'transactionId': transaction_id
         }))
 
-    # TODO: this should be made available
-    # https://github.com/iotaledger/iota-sdk/issues/1921
     def get_included_block_raw(
             self, transaction_id: TransactionId) -> List[int]:
         """Returns the earliest confirmed block containing the transaction with the given ID, as raw bytes.
@@ -367,8 +351,6 @@ class NodeCoreAPI(metaclass=ABCMeta):
             'commitmentId': commitment_id
         }))
 
-    # TODO: this should be made available
-    # https://github.com/iotaledger/iota-sdk/issues/1921
     def get_commitment_raw(
             self, commitment_id: SlotCommitmentId) -> List[int]:
         """Finds a slot commitment by its ID and returns it as raw bytes.
@@ -405,9 +387,7 @@ class NodeCoreAPI(metaclass=ABCMeta):
             'commitmentId': commitment_id
         }))
 
-    # TODO: call method name needs to be changed to `getCommitmentBySlot`
-    # https://github.com/iotaledger/iota-sdk/issues/1921
-    def get_slot_commitment_by_slot(
+    def get_commitment_by_slot(
             self, slot: SlotIndex) -> SlotCommitment:
         """Finds a slot commitment by slot index and returns it as object.
         GET /api/core/v3/commitments/by-slot/{slot}
@@ -415,13 +395,11 @@ class NodeCoreAPI(metaclass=ABCMeta):
         Returns:
             The corresponding slot commitment.
         """
-        return SlotCommitment.from_dict(self._call_method('getCommitmentByIndex', {
+        return SlotCommitment.from_dict(self._call_method('getCommitmentBySlot', {
             'slot': slot
         }))
 
-    # TODO: this should be made available
-    # https://github.com/iotaledger/iota-sdk/issues/1921
-    def get_slot_commitment_by_slot_raw(
+    def get_commitment_by_slot_raw(
             self, slot: SlotIndex) -> List[int]:
         """Finds a slot commitment by slot index and returns it as raw bytes.
         GET /api/core/v3/commitments/by-slot/{slot}
@@ -433,8 +411,6 @@ class NodeCoreAPI(metaclass=ABCMeta):
             'slot': slot
         })
 
-    # TODO: call method name needs to be changed to `getUxoChangesBySlot`
-    # https://github.com/iotaledger/iota-sdk/issues/1921
     def get_utxo_changes_by_slot(self, slot: SlotIndex) -> UtxoChangesResponse:
         """Get all UTXO changes of a given slot by its index.
         GET /api/core/v3/commitments/by-slot/{slot}/utxo-changes
@@ -442,12 +418,10 @@ class NodeCoreAPI(metaclass=ABCMeta):
         Returns:
             The corresponding UTXO changes.
         """
-        return UtxoChangesResponse.from_dict(self._call_method('getUtxoChangesByIndex', {
+        return UtxoChangesResponse.from_dict(self._call_method('getUtxoChangesBySlot', {
             'slot': slot
         }))
 
-    # TODO: call method name needs to be changed to `getUxoChangesFullBySlot`
-    # https://github.com/iotaledger/iota-sdk/issues/1921
     def get_utxo_changes_full_by_slot(
             self, slot: SlotIndex) -> UtxoChangesFullResponse:
         """Get all full UTXO changes of a given slot by its index.
@@ -456,6 +430,29 @@ class NodeCoreAPI(metaclass=ABCMeta):
         Returns:
             The full UTXO changes.
         """
-        return UtxoChangesFullResponse.from_dict(self._call_method('getUtxoChangesFullByIndex', {
+        return UtxoChangesFullResponse.from_dict(self._call_method('getUtxoChangesFullBySlot', {
             'slot': slot
         }))
+
+    # Plugin routes.
+
+    def call_plugin_route(self, base_plugin_path: str, method: str,
+                          endpoint: str, query_params: Optional[List[str]] = None, request: Optional[str] = None):
+        """Extension method which provides request methods for plugins.
+
+        Args:
+            base_plugin_path: The base path of the routes provided by the plugin.
+            method: The HTTP method.
+            endpoint: The endpoint to query provided by the plugin.
+            query_params: The parameters of the query.
+            request: The request object sent to the endpoint of the plugin.
+        """
+        if query_params is None:
+            query_params = []
+        return self._call_method('callPluginRoute', {
+            'basePluginPath': base_plugin_path,
+            'method': method,
+            'endpoint': endpoint,
+            'queryParams': query_params,
+            'request': request,
+        })

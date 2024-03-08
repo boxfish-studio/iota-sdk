@@ -4,23 +4,19 @@
 use std::collections::HashSet;
 
 use crate::{
-    client::secret::SecretManage,
+    client::{secret::SecretManage, ClientError},
     types::block::output::{FoundryId, Output},
-    wallet::{task, Wallet},
+    wallet::{task, Wallet, WalletError},
 };
 
-impl<S: 'static + SecretManage> Wallet<S>
-where
-    crate::wallet::Error: From<S::Error>,
-    crate::client::Error: From<S::Error>,
-{
+impl<S: 'static + SecretManage> Wallet<S> {
     pub(crate) async fn request_and_store_foundry_outputs(
         &self,
         foundry_ids: HashSet<FoundryId>,
-    ) -> crate::wallet::Result<()> {
+    ) -> Result<(), WalletError> {
         log::debug!("[SYNC] request_and_store_foundry_outputs");
 
-        let mut foundries = self.data().await.native_token_foundries.clone();
+        let mut foundries = self.ledger().await.native_token_foundries.clone();
         let results =
             futures::future::try_join_all(foundry_ids.into_iter().filter(|f| !foundries.contains_key(f)).map(
                 |foundry_id| {
@@ -29,8 +25,8 @@ where
                         task::spawn(async move {
                             match client.foundry_output_id(foundry_id).await {
                                 Ok(output_id) => Ok(Some(client.get_output(&output_id).await?)),
-                                Err(crate::client::Error::NoOutput(_)) => Ok(None),
-                                Err(e) => Err(crate::wallet::Error::Client(e.into())),
+                                Err(ClientError::NoOutput(_)) => Ok(None),
+                                Err(e) => Err(WalletError::Client(e)),
                             }
                         })
                         .await?
@@ -46,8 +42,8 @@ where
             }
         }
 
-        let mut wallet_data = self.data_mut().await;
-        wallet_data.native_token_foundries = foundries;
+        let mut wallet_ledger = self.ledger_mut().await;
+        wallet_ledger.native_token_foundries = foundries;
 
         Ok(())
     }

@@ -4,6 +4,7 @@
 mod anchor;
 mod chain_id;
 mod delegation;
+mod error;
 mod metadata;
 mod native_token;
 mod output_id;
@@ -30,34 +31,29 @@ use derive_more::From;
 use getset::Getters;
 use packable::Packable;
 
+pub(crate) use self::unlock_condition::AddressUnlockCondition;
 pub use self::{
     account::{AccountId, AccountOutput, AccountOutputBuilder},
     anchor::{AnchorId, AnchorOutput, AnchorOutputBuilder, AnchorTransition},
     basic::{BasicOutput, BasicOutputBuilder},
     chain_id::ChainId,
     delegation::{DelegationId, DelegationOutput, DelegationOutputBuilder},
+    error::OutputError,
     feature::{Feature, Features},
     foundry::{FoundryId, FoundryOutput, FoundryOutputBuilder},
     metadata::{OutputConsumptionMetadata, OutputInclusionMetadata, OutputMetadata},
-    native_token::{NativeToken, NativeTokens, NativeTokensBuilder, TokenId},
+    native_token::{NativeToken, NativeTokenError, NativeTokens, NativeTokensBuilder, TokenId},
     nft::{NftId, NftOutput, NftOutputBuilder},
     output_id::OutputId,
-    output_id_proof::{HashableNode, LeafHash, OutputCommitmentProof, OutputIdProof, ValueHash},
+    output_id_proof::{HashableNode, LeafHash, OutputCommitmentProof, OutputIdProof, ProofError, ValueHash},
     storage_score::{StorageScore, StorageScoreParameters},
-    token_scheme::{SimpleTokenScheme, TokenScheme},
+    token_scheme::{SimpleTokenScheme, TokenScheme, TokenSchemeError},
     unlock_condition::{UnlockCondition, UnlockConditions},
-};
-pub(crate) use self::{
-    feature::{MetadataFeatureEntryCount, MetadataFeatureKeyLength, MetadataFeatureValueLength, TagFeatureLength},
-    native_token::NativeTokenCount,
-    output_id::OutputIndex,
-    unlock_condition::AddressUnlockCondition,
 };
 use crate::types::block::{
     address::Address,
     protocol::{CommittableAgeRange, ProtocolParameters, WorkScore, WorkScoreParameters},
     slot::SlotIndex,
-    Error,
 };
 #[cfg(feature = "serde")]
 use crate::utils::serde::string;
@@ -74,11 +70,12 @@ pub const OUTPUT_INDEX_RANGE: RangeInclusive<u16> = 0..=OUTPUT_INDEX_MAX; // [0.
 #[derive(Copy, Clone)]
 pub enum OutputBuilderAmount {
     Amount(u64),
+    AmountOrMinimum(u64, StorageScoreParameters),
     MinimumAmount(StorageScoreParameters),
 }
 
-/// Contains the generic [`Output`] with associated [`OutputIdProof`] and [`OutputMetadata`].
-#[derive(Clone, Debug)]
+/// Contains the generic [`Output`] and the associated [`OutputMetadata`].
+#[derive(Clone, Debug, Eq, PartialEq)]
 #[cfg_attr(
     feature = "serde",
     derive(serde::Serialize, serde::Deserialize),
@@ -86,57 +83,15 @@ pub enum OutputBuilderAmount {
 )]
 pub struct OutputWithMetadata {
     pub output: Output,
-    pub output_id_proof: OutputIdProof,
     pub metadata: OutputMetadata,
-}
-
-impl OutputWithMetadata {
-    /// Creates a new [`OutputWithMetadata`].
-    pub fn new(output: Output, output_id_proof: OutputIdProof, metadata: OutputMetadata) -> Self {
-        Self {
-            output,
-            output_id_proof,
-            metadata,
-        }
-    }
-
-    /// Returns the [`Output`].
-    pub fn output(&self) -> &Output {
-        &self.output
-    }
-
-    /// Consumes self and returns the [`Output`].
-    pub fn into_output(self) -> Output {
-        self.output
-    }
-
-    /// Returns the [`OutputIdProof`].
-    pub fn output_id_proof(&self) -> &OutputIdProof {
-        &self.output_id_proof
-    }
-
-    /// Consumes self and returns the [`OutputIdProof`].
-    pub fn into_output_id_proof(self) -> OutputIdProof {
-        self.output_id_proof
-    }
-
-    /// Returns the [`OutputMetadata`].
-    pub fn metadata(&self) -> &OutputMetadata {
-        &self.metadata
-    }
-
-    /// Consumes self and returns the [`OutputMetadata`].
-    pub fn into_metadata(self) -> OutputMetadata {
-        self.metadata
-    }
 }
 
 /// A generic output that can represent different types defining the deposit of funds.
 #[derive(Clone, Eq, PartialEq, Ord, PartialOrd, Hash, From, Packable)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize), serde(untagged))]
-#[packable(unpack_error = Error)]
+#[packable(unpack_error = OutputError)]
 #[packable(unpack_visitor = ProtocolParameters)]
-#[packable(tag_type = u8, with_error = Error::InvalidOutputKind)]
+#[packable(tag_type = u8, with_error = OutputError::Kind)]
 pub enum Output {
     /// A basic output.
     #[packable(tag = BasicOutput::KIND)]
@@ -226,13 +181,13 @@ impl Output {
         protocol_parameters: &ProtocolParameters,
         creation_index: SlotIndex,
         target_index: SlotIndex,
-    ) -> Result<u64, Error> {
+    ) -> Result<u64, OutputError> {
         let decayed_mana = self.decayed_mana(protocol_parameters, creation_index, target_index)?;
 
         decayed_mana
             .stored
             .checked_add(decayed_mana.potential)
-            .ok_or(Error::ConsumedManaOverflow)
+            .ok_or(OutputError::ConsumedManaOverflow)
     }
 
     /// Returns the decayed stored and potential mana of the output.
@@ -241,26 +196,15 @@ impl Output {
         protocol_parameters: &ProtocolParameters,
         creation_index: SlotIndex,
         target_index: SlotIndex,
-    ) -> Result<DecayedMana, Error> {
-        let (amount, mana) = match self {
-            Self::Basic(output) => (output.amount(), output.mana()),
-            Self::Account(output) => (output.amount(), output.mana()),
-            Self::Anchor(output) => (output.amount(), output.mana()),
-            Self::Foundry(output) => (output.amount(), 0),
-            Self::Nft(output) => (output.amount(), output.mana()),
-            Self::Delegation(output) => (output.amount(), 0),
-        };
-
-        let min_deposit = self.minimum_amount(protocol_parameters.storage_score_parameters());
-        let generation_amount = amount.saturating_sub(min_deposit);
-        let stored_mana = protocol_parameters.mana_with_decay(mana, creation_index, target_index)?;
-        let potential_mana =
-            protocol_parameters.generate_mana_with_decay(generation_amount, creation_index, target_index)?;
-
-        Ok(DecayedMana {
-            stored: stored_mana,
-            potential: potential_mana,
-        })
+    ) -> Result<DecayedMana, OutputError> {
+        match self {
+            Self::Basic(output) => output.decayed_mana(protocol_parameters, creation_index, target_index),
+            Self::Account(output) => output.decayed_mana(protocol_parameters, creation_index, target_index),
+            Self::Anchor(output) => output.decayed_mana(protocol_parameters, creation_index, target_index),
+            Self::Foundry(output) => output.decayed_mana(protocol_parameters, creation_index, target_index),
+            Self::Nft(output) => output.decayed_mana(protocol_parameters, creation_index, target_index),
+            Self::Delegation(output) => output.decayed_mana(protocol_parameters, creation_index, target_index),
+        }
     }
 
     /// Returns the unlock conditions of an [`Output`], if any.
@@ -352,14 +296,14 @@ impl Output {
         &self,
         commitment_slot_index: impl Into<Option<SlotIndex>>,
         committable_age_range: CommittableAgeRange,
-    ) -> Result<Option<Address>, Error> {
+    ) -> Result<Option<Address>, OutputError> {
         Ok(match self {
             Self::Basic(output) => output
                 .unlock_conditions()
                 .locked_address(output.address(), commitment_slot_index, committable_age_range)?
                 .cloned(),
             Self::Account(output) => Some(output.address().clone()),
-            Self::Anchor(_) => return Err(Error::UnsupportedOutputKind(AnchorOutput::KIND)),
+            Self::Anchor(_) => return Err(OutputError::Kind(AnchorOutput::KIND)),
             Self::Foundry(output) => Some(Address::Account(*output.account_address())),
             Self::Nft(output) => output
                 .unlock_conditions()
@@ -373,12 +317,12 @@ impl Output {
     /// Each [`Output`] has to have an amount that covers its associated byte cost, given by [`StorageScoreParameters`].
     /// If there is a [`StorageDepositReturnUnlockCondition`](unlock_condition::StorageDepositReturnUnlockCondition),
     /// its amount is also checked.
-    pub fn verify_storage_deposit(&self, params: StorageScoreParameters) -> Result<(), Error> {
+    pub fn verify_storage_deposit(&self, params: StorageScoreParameters) -> Result<(), OutputError> {
         let minimum_storage_deposit = self.minimum_amount(params);
 
         // For any created `Output` in a transaction, it must hold that `Output::Amount >= Minimum Storage Deposit`.
         if self.amount() < minimum_storage_deposit {
-            return Err(Error::InsufficientStorageDepositAmount {
+            return Err(OutputError::AmountLessThanMinimum {
                 amount: self.amount(),
                 required: minimum_storage_deposit,
             });
@@ -391,7 +335,7 @@ impl Output {
             // We can't return more tokens than were originally contained in the output.
             // `Return Amount` ≤ `Amount`.
             if return_condition.amount() > self.amount() {
-                return Err(Error::StorageDepositReturnExceedsOutputAmount {
+                return Err(OutputError::StorageDepositReturnExceedsOutputAmount {
                     deposit: return_condition.amount(),
                     amount: self.amount(),
                 });
@@ -401,7 +345,7 @@ impl Output {
 
             // `Minimum Storage Deposit` ≤ `Return Amount`
             if return_condition.amount() < minimum_storage_deposit {
-                return Err(Error::InsufficientStorageDepositReturnAmount {
+                return Err(OutputError::InsufficientStorageDepositReturnAmount {
                     deposit: return_condition.amount(),
                     required: minimum_storage_deposit,
                 });

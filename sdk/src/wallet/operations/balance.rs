@@ -1,6 +1,8 @@
 // Copyright 2024 IOTA Stiftung
 // SPDX-License-Identifier: Apache-2.0
 
+use std::collections::HashSet;
+
 use primitive_types::U256;
 
 use crate::{
@@ -11,23 +13,20 @@ use crate::{
     wallet::{
         operations::{helpers::time::can_output_be_unlocked_forever_from_now_on, output_claiming::OutputsToClaim},
         types::{Balance, NativeTokensBalance},
-        Result, Wallet,
+        Wallet, WalletError,
     },
 };
 
-impl<S: 'static + SecretManage> Wallet<S>
-where
-    crate::wallet::Error: From<S::Error>,
-    crate::client::Error: From<S::Error>,
-{
+impl<S: 'static + SecretManage> Wallet<S> {
     /// Get the balance of the wallet.
-    pub async fn balance(&self) -> Result<Balance> {
+    pub async fn balance(&self) -> Result<Balance, WalletError> {
         log::debug!("[BALANCE] balance");
 
         let protocol_parameters = self.client().get_protocol_parameters().await?;
         let slot_index = self.client().get_slot_index().await?;
 
-        let wallet_data = self.data().await.clone();
+        let wallet_address = self.address().await;
+        let wallet_ledger = self.ledger().await;
         let network_id = protocol_parameters.network_id();
         let storage_score_params = protocol_parameters.storage_score_parameters();
 
@@ -36,20 +35,23 @@ where
         let mut total_native_tokens = NativeTokensBuilder::default();
 
         #[cfg(feature = "participation")]
-        let voting_output = wallet_data.get_voting_output()?;
+        let voting_output = wallet_ledger.get_voting_output();
 
-        let claimable_outputs = wallet_data.claimable_outputs(OutputsToClaim::All, slot_index, &protocol_parameters)?;
+        let claimable_outputs =
+            wallet_ledger.claimable_outputs(&wallet_address, OutputsToClaim::All, slot_index, &protocol_parameters)?;
 
         #[cfg(feature = "participation")]
         {
             if let Some(voting_output) = &voting_output {
-                if voting_output.output.as_basic().address() == wallet_data.address.inner() {
+                if voting_output.output.as_basic().address() == wallet_address.inner() {
                     balance.base_coin.voting_power = voting_output.output.amount();
                 }
             }
         }
 
-        for (output_id, output_data) in &wallet_data.unspent_outputs {
+        let mut reward_outputs = HashSet::new();
+
+        for (output_id, output_data) in &wallet_ledger.unspent_outputs {
             // Check if output is from the network we're currently connected to
             if output_data.network_id != network_id {
                 continue;
@@ -70,13 +72,13 @@ where
                         slot_index,
                     )?;
                     // Add mana rewards
-                    if let Ok(response) = self.client().get_output_mana_rewards(output_id, slot_index).await {
-                        balance.mana.rewards += response.rewards;
+                    if account.features().staking().is_some() {
+                        reward_outputs.insert(*output_id);
                     }
 
                     // Add storage deposit
                     balance.required_storage_deposit.account += storage_cost;
-                    if !wallet_data.locked_outputs.contains(output_id) {
+                    if !wallet_ledger.locked_outputs.contains(output_id) {
                         total_storage_cost += storage_cost;
                     }
 
@@ -88,7 +90,7 @@ where
                     balance.base_coin.total += foundry.amount();
                     // Add storage deposit
                     balance.required_storage_deposit.foundry += storage_cost;
-                    if !wallet_data.locked_outputs.contains(output_id) {
+                    if !wallet_ledger.locked_outputs.contains(output_id) {
                         total_storage_cost += storage_cost;
                     }
 
@@ -103,12 +105,10 @@ where
                     // Add amount
                     balance.base_coin.total += delegation.amount();
                     // Add mana rewards
-                    if let Ok(response) = self.client().get_output_mana_rewards(output_id, slot_index).await {
-                        balance.mana.rewards += response.rewards;
-                    }
+                    reward_outputs.insert(*output_id);
                     // Add storage deposit
                     balance.required_storage_deposit.delegation += storage_cost;
-                    if !wallet_data.locked_outputs.contains(output_id) {
+                    if !wallet_ledger.locked_outputs.contains(output_id) {
                         total_storage_cost += storage_cost;
                     }
 
@@ -141,12 +141,12 @@ where
                         // Add storage deposit
                         if output.is_basic() {
                             balance.required_storage_deposit.basic += storage_cost;
-                            if output.native_token().is_some() && !wallet_data.locked_outputs.contains(output_id) {
+                            if output.native_token().is_some() && !wallet_ledger.locked_outputs.contains(output_id) {
                                 total_storage_cost += storage_cost;
                             }
                         } else if output.is_nft() {
                             balance.required_storage_deposit.nft += storage_cost;
-                            if !wallet_data.locked_outputs.contains(output_id) {
+                            if !wallet_ledger.locked_outputs.contains(output_id) {
                                 total_storage_cost += storage_cost;
                             }
                         }
@@ -172,7 +172,7 @@ where
                                 // We use the addresses with unspent outputs, because other addresses of
                                 // the account without unspent
                                 // outputs can't be related to this output
-                                wallet_data.address.inner(),
+                                wallet_address.inner(),
                                 output,
                                 slot_index,
                                 protocol_parameters.committable_age_range(),
@@ -188,7 +188,7 @@ where
                                     .map_or_else(
                                         || output.amount(),
                                         |sdr| {
-                                            if wallet_data.address.inner() == sdr.return_address() {
+                                            if wallet_address.inner() == sdr.return_address() {
                                                 // sending to ourself, we get the full amount
                                                 output.amount()
                                             } else {
@@ -219,13 +219,13 @@ where
                                     // Amount for basic outputs isn't added to total storage cost if there aren't native
                                     // tokens, since we can spend it without burning.
                                     if output.native_token().is_some()
-                                        && !wallet_data.locked_outputs.contains(output_id)
+                                        && !wallet_ledger.locked_outputs.contains(output_id)
                                     {
                                         total_storage_cost += storage_cost;
                                     }
                                 } else if output.is_nft() {
                                     balance.required_storage_deposit.nft += storage_cost;
-                                    if !wallet_data.locked_outputs.contains(output_id) {
+                                    if !wallet_ledger.locked_outputs.contains(output_id) {
                                         total_storage_cost += storage_cost;
                                     }
                                 }
@@ -259,18 +259,18 @@ where
         }
 
         // for `available` get locked_outputs, sum outputs amount and subtract from total_amount
-        log::debug!("[BALANCE] locked outputs: {:#?}", wallet_data.locked_outputs);
+        log::debug!("[BALANCE] locked outputs: {:#?}", wallet_ledger.locked_outputs);
 
         let mut locked_amount = 0;
         let mut locked_mana = DecayedMana::default();
         let mut locked_native_tokens = NativeTokensBuilder::default();
 
-        for locked_output in &wallet_data.locked_outputs {
+        for locked_output in &wallet_ledger.locked_outputs {
             // Skip potentially_locked_outputs, as their amounts aren't added to the balance
             if balance.potentially_locked_outputs.contains_key(locked_output) {
                 continue;
             }
-            if let Some(output_data) = wallet_data.unspent_outputs.get(locked_output) {
+            if let Some(output_data) = wallet_ledger.unspent_outputs.get(locked_output) {
                 // Only check outputs that are in this network
                 if output_data.network_id == network_id {
                     locked_amount += output_data.output.amount();
@@ -309,7 +309,7 @@ where
                 }
             });
 
-            let metadata = wallet_data
+            let metadata = wallet_ledger
                 .native_token_foundries
                 .get(&FoundryId::from(*native_token.token_id()))
                 .and_then(|foundry| foundry.immutable_features().metadata())
@@ -323,6 +323,14 @@ where
                     metadata,
                 },
             );
+        }
+
+        drop(wallet_ledger);
+
+        for output_id in reward_outputs {
+            if let Ok(response) = self.client().get_output_mana_rewards(&output_id, slot_index).await {
+                balance.mana.rewards += response.rewards;
+            }
         }
 
         #[cfg(not(feature = "participation"))]

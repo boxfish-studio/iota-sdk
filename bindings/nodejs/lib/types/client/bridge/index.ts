@@ -3,22 +3,27 @@
 
 import type {
     __GetInfoMethod__,
+    __GetRoutesMethod__,
     __GetOutputIdsMethod__,
     __GetBasicOutputIdsMethod__,
     __GetOutputMethod__,
+    __GetOutputRawMethod__,
     __GetOutputsMethod__,
+    __GetOutputsIgnoreNotFoundMethod__,
+    __GetOutputMetadataMethod__,
+    __GetOutputWithMetadataMethod__,
     __PostBlockMethod__,
-    __GetTipsMethod__,
-    __GetNetworkInfoMethod__,
+    __PostBlockRawMethod__,
     __GetAccountCongestionMethod__,
-    __GetRewardsMethod__,
+    __GetOutputManaRewardsMethod__,
+    __GetCommitteeMethod__,
     __GetValidatorsMethod__,
     __GetValidatorMethod__,
+    __GetIssuanceMethod__,
     __GetBlockMethod__,
     __GetBlockMetadataMethod__,
     __GetBlockWithMetadataMethod__,
     __FindInputsMethod__,
-    __SignTransactionMethod__,
     __BuildBasicBlockMethod__,
     __GetNodeMethod__,
     __GetNetworkIdMethod__,
@@ -26,21 +31,21 @@ import type {
     __GetProtocolParametersMethod__,
     __GetHealthMethod__,
     __GetNodeInfoMethod__,
-    __PostBlockRawMethod__,
+    __GetNetworkMetricsMethod__,
     __GetBlockRawMethod__,
     __GetIncludedBlockMethod__,
+    __GetIncludedBlockRawMethod__,
     __GetIncludedBlockMetadataMethod__,
     __GetTransactionMetadataMethod__,
     __GetCommitmentMethod__,
+    __GetCommitmentRawMethod__,
     __GetUtxoChangesMethod__,
     __GetUtxoChangesFullMethod__,
-    __GetCommitmentByIndexMethod__,
-    __GetUtxoChangesByIndexMethod__,
-    __GetUtxoChangesFullByIndexMethod__,
-    __HexToBech32Method__,
-    __AccountIdToBech32Method__,
-    __NftIdToBech32Method__,
-    __HexPublicKeyToBech32AddressMethod__,
+    __GetCommitmentBySlotMethod__,
+    __GetCommitmentBySlotRawMethod__,
+    __GetUtxoChangesBySlotMethod__,
+    __GetUtxoChangesFullBySlotMethod__,
+    __AddressToBech32Method__,
     __AccountOutputIdsMethod__,
     __AccountOutputIdMethod__,
     __AnchorOutputIdsMethod__,
@@ -51,7 +56,6 @@ import type {
     __FoundryOutputIdMethod__,
     __NftOutputIdsMethod__,
     __NftOutputIdMethod__,
-    __GetOutputsIgnoreErrorsMethod__,
     __FindBlocksMethod__,
     __UnhealthyNodesMethod__,
     __BuildBasicOutputMethod__,
@@ -59,7 +63,6 @@ import type {
     __BuildFoundryOutputMethod__,
     __BuildNftOutputMethod__,
     __ClearListenersMethod__,
-    __SignatureUnlockMethod__,
     __ComputeMinimumOutputAmountMethod__,
     __RequestFundsFromFaucetMethod__,
     __CallPluginRouteMethod__,
@@ -68,23 +71,27 @@ import type {
 
 export type __ClientMethods__ =
     | __GetInfoMethod__
-    | __GetOutputMethod__
+    | __GetRoutesMethod__
     | __GetOutputIdsMethod__
     | __GetBasicOutputIdsMethod__
+    | __GetOutputMethod__
+    | __GetOutputRawMethod__
     | __GetOutputsMethod__
+    | __GetOutputsIgnoreNotFoundMethod__
+    | __GetOutputMetadataMethod__
+    | __GetOutputWithMetadataMethod__
     | __PostBlockMethod__
-    | __GetTipsMethod__
-    | __GetNetworkInfoMethod__
+    | __PostBlockRawMethod__
     | __GetAccountCongestionMethod__
-    | __GetRewardsMethod__
+    | __GetOutputManaRewardsMethod__
+    | __GetCommitteeMethod__
     | __GetValidatorsMethod__
     | __GetValidatorMethod__
+    | __GetIssuanceMethod__
     | __GetBlockMethod__
     | __GetBlockMetadataMethod__
     | __GetBlockWithMetadataMethod__
     | __FindInputsMethod__
-    | __SignTransactionMethod__
-    | __SignatureUnlockMethod__
     | __BuildBasicBlockMethod__
     | __GetNodeMethod__
     | __GetNetworkIdMethod__
@@ -92,21 +99,21 @@ export type __ClientMethods__ =
     | __GetProtocolParametersMethod__
     | __GetHealthMethod__
     | __GetNodeInfoMethod__
-    | __PostBlockRawMethod__
+    | __GetNetworkMetricsMethod__
     | __GetBlockRawMethod__
     | __GetIncludedBlockMethod__
+    | __GetIncludedBlockRawMethod__
     | __GetIncludedBlockMetadataMethod__
     | __GetTransactionMetadataMethod__
     | __GetCommitmentMethod__
+    | __GetCommitmentRawMethod__
     | __GetUtxoChangesMethod__
     | __GetUtxoChangesFullMethod__
-    | __GetCommitmentByIndexMethod__
-    | __GetUtxoChangesByIndexMethod__
-    | __GetUtxoChangesFullByIndexMethod__
-    | __HexToBech32Method__
-    | __AccountIdToBech32Method__
-    | __NftIdToBech32Method__
-    | __HexPublicKeyToBech32AddressMethod__
+    | __GetCommitmentBySlotMethod__
+    | __GetCommitmentBySlotRawMethod__
+    | __GetUtxoChangesBySlotMethod__
+    | __GetUtxoChangesFullBySlotMethod__
+    | __AddressToBech32Method__
     | __AccountOutputIdsMethod__
     | __AccountOutputIdMethod__
     | __AnchorOutputIdsMethod__
@@ -117,7 +124,6 @@ export type __ClientMethods__ =
     | __FoundryOutputIdMethod__
     | __NftOutputIdsMethod__
     | __NftOutputIdMethod__
-    | __GetOutputsIgnoreErrorsMethod__
     | __FindBlocksMethod__
     | __UnhealthyNodesMethod__
     | __BuildBasicOutputMethod__

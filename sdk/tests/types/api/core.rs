@@ -4,15 +4,11 @@
 use iota_sdk::types::{
     api::core::{
         BlockMetadataResponse, BlockWithMetadataResponse, CommitteeResponse, CongestionResponse, InfoResponse,
-        IssuanceBlockHeaderResponse, ManaRewardsResponse, OutputResponse, RoutesResponse, SubmitBlockResponse,
-        TransactionMetadataResponse, UtxoChangesFullResponse, UtxoChangesResponse, ValidatorResponse,
-        ValidatorsResponse,
+        IssuanceBlockHeaderResponse, ManaRewardsResponse, OutputResponse, OutputWithMetadataResponse, RoutesResponse,
+        SubmitBlockResponse, TransactionMetadataResponse, UtxoChangesFullResponse, UtxoChangesResponse,
+        ValidatorResponse, ValidatorsResponse,
     },
-    block::{
-        output::{OutputMetadata, OutputWithMetadata},
-        slot::SlotCommitment,
-        BlockDto,
-    },
+    block::{output::OutputMetadata, slot::SlotCommitment, BlockDto},
 };
 use packable::{
     error::{UnexpectedEOF, UnpackError},
@@ -44,9 +40,9 @@ fn binary_response<T: PackableExt>(
     let file = std::fs::read_to_string(format!("./tests/types/api/fixtures/{path}")).unwrap();
     let bytes = hex::decode(file).unwrap();
     let mut unpacker = SliceUnpacker::new(bytes.as_slice());
-    let res = T::unpack::<_, true>(&mut unpacker, visitor);
+    let res = T::unpack_verified(&mut unpacker, visitor);
 
-    assert!(u8::unpack::<_, true>(&mut unpacker, &()).is_err());
+    assert!(u8::unpack_verified(&mut unpacker, &()).is_err());
 
     res
 }
@@ -56,6 +52,7 @@ fn responses() {
     // GET /api/routes
     json_response::<RoutesResponse>("get-routes-response-example.json").unwrap();
     // GET /api/core/v3/info
+    // TODO reenable when Metrics are split out of Info
     // json_response::<InfoResponse>("get-info-response-example.json").unwrap();
     // GET /api/core/v3/accounts/{bech32Address}/congestion
     json_response::<CongestionResponse>("get-congestion-estimate-response-example.json").unwrap();
@@ -90,7 +87,7 @@ fn responses() {
     json_response::<OutputMetadata>("get-output-metadata-by-id-response-unspent-example.json").unwrap();
     json_response::<OutputMetadata>("get-output-metadata-by-id-response-spent-example.json").unwrap();
     // GET /api/core/v3/outputs/{outputId}/full
-    json_response::<OutputWithMetadata>("get-full-output-metadata-example.json").unwrap();
+    json_response::<OutputWithMetadataResponse>("get-full-output-metadata-example.json").unwrap();
     // GET /api/core/v3/transactions/{transactionId}/metadata
     json_response::<TransactionMetadataResponse>("get-transaction-metadata-by-id-response-example.json").unwrap();
     // GET /api/core/v3/commitments/{commitmentId}

@@ -21,6 +21,7 @@ import {
     Unlock,
     DecayedMana,
     NumericString,
+    Ed25519Address,
 } from '../types';
 import {
     AccountId,
@@ -69,9 +70,9 @@ export class Utils {
      */
     static computeAccountId(outputId: OutputId): AccountId {
         return callUtilsMethod({
-            name: 'computeAccountId',
+            name: 'blake2b256Hash',
             data: {
-                outputId,
+                bytes: outputId,
             },
         });
     }
@@ -107,9 +108,9 @@ export class Utils {
      */
     static computeNftId(outputId: OutputId): NftId {
         return callUtilsMethod({
-            name: 'computeNftId',
+            name: 'blake2b256Hash',
             data: {
-                outputId,
+                bytes: outputId,
             },
         });
     }
@@ -259,95 +260,37 @@ export class Utils {
     }
 
     /**
-     * Convert a Bech32 address to a hex-encoded string.
+     * Converts an address to its bech32 representation.
      *
-     * @param bech32 A Bech32 address.
-     * @returns The hex-encoded string.
-     */
-    static bech32ToHex(bech32: Bech32Address): HexEncodedString {
-        return callUtilsMethod({
-            name: 'bech32ToHex',
-            data: {
-                bech32,
-            },
-        });
-    }
-
-    /**
-     * Convert a hex-encoded address string to a Bech32-encoded address string.
-     *
-     * @param hex A hex-encoded address string.
+     * @param address An address.
      * @param bech32Hrp The Bech32 HRP (human readable part) to use.
      * @returns The Bech32-encoded address string.
      */
-    static hexToBech32(
-        hex: HexEncodedString,
-        bech32Hrp: string,
-    ): Bech32Address {
+    static addressToBech32(address: Address, bech32Hrp: string): Bech32Address {
         return callUtilsMethod({
-            name: 'hexToBech32',
+            name: 'addressToBech32',
             data: {
-                hex,
+                address,
                 bech32Hrp,
             },
         });
     }
 
     /**
-     * Transforms an account id to a bech32 encoded address.
+     * Hashes a hex encoded public key with Blake2b256.
      *
-     * @param accountId An account ID.
-     * @param bech32Hrp The Bech32 HRP (human readable part) to use.
-     * @returns The Bech32-encoded address string.
+     * @param hex The hexadecimal string representation of a public key.
+     * @returns The Ed25519 address with the hashed public key.
      */
-    static accountIdToBech32(
-        accountId: AccountId,
-        bech32Hrp: string,
-    ): Bech32Address {
-        return callUtilsMethod({
-            name: 'accountIdToBech32',
-            data: {
-                accountId,
-                bech32Hrp,
-            },
-        });
-    }
-
-    /**
-     * Convert an NFT ID to a Bech32-encoded address string.
-     *
-     * @param nftId An NFT ID.
-     * @param bech32Hrp The Bech32 HRP (human readable part) to use.
-     * @returns The Bech32-encoded address string.
-     */
-    static nftIdToBech32(nftId: NftId, bech32Hrp: string): Bech32Address {
-        return callUtilsMethod({
-            name: 'nftIdToBech32',
-            data: {
-                nftId,
-                bech32Hrp,
-            },
-        });
-    }
-
-    /**
-     * Convert a hex-encoded public key to a Bech32-encoded address string.
-     *
-     * @param hex A hex-encoded public key.
-     * @param bech32Hrp The Bech32 HRP (human readable part) to use.
-     * @returns The Bech32-encoded address string.
-     */
-    static hexPublicKeyToBech32Address(
-        hex: HexEncodedString,
-        bech32Hrp: string,
-    ): Bech32Address {
-        return callUtilsMethod({
-            name: 'hexPublicKeyToBech32Address',
-            data: {
-                hex,
-                bech32Hrp,
-            },
-        });
+    static publicKeyHash(hex: HexEncodedString): Ed25519Address {
+        return new Ed25519Address(
+            callUtilsMethod({
+                name: 'blake2b256Hash',
+                data: {
+                    bytes: hex,
+                },
+            }),
+        );
     }
 
     /**
@@ -521,7 +464,7 @@ export class Utils {
      * @param unlocks The unlocks.
      * @param manaRewards The total mana rewards claimed in the transaction.
      *
-     * @returns The conflict reason.
+     * @returns void.
      */
     static verifyTransactionSemantic(
         transaction: SignedTransactionPayload,
@@ -529,8 +472,8 @@ export class Utils {
         protocolParameters: ProtocolParameters,
         unlocks?: Unlock[],
         manaRewards?: { [outputId: HexEncodedString]: NumericString },
-    ): string {
-        const conflictReason = callUtilsMethod({
+    ): void {
+        return callUtilsMethod({
             name: 'verifyTransactionSemantic',
             data: {
                 transaction,
@@ -540,7 +483,6 @@ export class Utils {
                 manaRewards,
             },
         });
-        return conflictReason;
     }
 
     /**
@@ -665,5 +607,19 @@ export class Utils {
             },
         });
         return new Uint8Array(blockBytes);
+    }
+
+    static iotaMainnetProtocolParameters(): ProtocolParameters {
+        const params = callUtilsMethod({
+            name: 'iotaMainnetProtocolParameters',
+        });
+        return params;
+    }
+
+    static shimmerMainnetProtocolParameters(): ProtocolParameters {
+        const params = callUtilsMethod({
+            name: 'shimmerMainnetProtocolParameters',
+        });
+        return params;
     }
 }

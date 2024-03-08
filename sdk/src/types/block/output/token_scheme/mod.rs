@@ -1,18 +1,16 @@
 // Copyright 2020-2022 IOTA Stiftung
 // SPDX-License-Identifier: Apache-2.0
 
+mod error;
 mod simple;
 
-pub use self::simple::SimpleTokenScheme;
-use crate::types::block::{
-    protocol::{WorkScore, WorkScoreParameters},
-    Error,
-};
+pub use self::{error::TokenSchemeError, simple::SimpleTokenScheme};
+use crate::types::block::protocol::{WorkScore, WorkScoreParameters};
 
 ///
 #[derive(Clone, Eq, PartialEq, Ord, PartialOrd, Hash, derive_more::From, packable::Packable)]
-#[packable(unpack_error = Error)]
-#[packable(tag_type = u8, with_error = Error::InvalidTokenSchemeKind)]
+#[packable(unpack_error = TokenSchemeError)]
+#[packable(tag_type = u8, with_error = TokenSchemeError::Kind)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize), serde(untagged))]
 pub enum TokenScheme {
     ///

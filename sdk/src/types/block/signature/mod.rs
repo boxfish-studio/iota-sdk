@@ -2,14 +2,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
 mod ed25519;
+mod error;
 
 use derive_more::From;
 
-pub use self::ed25519::Ed25519Signature;
-use crate::types::block::{
-    protocol::{WorkScore, WorkScoreParameters},
-    Error,
-};
+pub use self::{ed25519::Ed25519Signature, error::SignatureError};
+use crate::types::block::protocol::{WorkScore, WorkScoreParameters};
 
 /// A `Signature` contains a signature which is used to unlock a transaction input.
 ///
@@ -17,8 +15,8 @@ use crate::types::block::{
 ///
 /// RFC: <https://github.com/luca-moser/protocol-rfcs/blob/signed-tx-payload/text/0000-transaction-payload/0000-transaction-payload.md#signature-unlock-block>
 #[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, packable::Packable, From)]
-#[packable(unpack_error = Error)]
-#[packable(tag_type = u8, with_error = Error::InvalidSignatureKind)]
+#[packable(unpack_error = SignatureError)]
+#[packable(tag_type = u8, with_error = SignatureError::Kind)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize), serde(untagged))]
 pub enum Signature {
     /// An Ed25519 signature.

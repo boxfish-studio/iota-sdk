@@ -12,12 +12,11 @@ use crate::client::node_api::mqtt::{BrokerOptions, MqttEvent};
 use crate::{
     client::{
         constants::DEFAULT_API_TIMEOUT,
-        error::Result,
         node_manager::{
             builder::validate_url,
             node::{Node, NodeAuth},
         },
-        Client,
+        Client, ClientError,
     },
     types::block::protocol::ProtocolParameters,
 };
@@ -33,11 +32,11 @@ pub struct ClientBuilder {
     /// Options for the MQTT broker
     #[cfg(feature = "mqtt")]
     #[cfg_attr(docsrs, doc(cfg(feature = "mqtt")))]
-    #[serde(flatten)]
+    #[serde(default)]
     pub broker_options: BrokerOptions,
-    /// Data related to the used network
-    #[serde(flatten, default)]
-    pub network_info: NetworkInfo,
+    /// Protocol parameters
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub protocol_parameters: Option<ProtocolParameters>,
     /// Timeout for API requests
     #[serde(default = "default_api_timeout")]
     pub api_timeout: Duration,
@@ -62,7 +61,7 @@ impl Default for ClientBuilder {
             node_manager_builder: crate::client::node_manager::NodeManager::builder(),
             #[cfg(feature = "mqtt")]
             broker_options: Default::default(),
-            network_info: NetworkInfo::default(),
+            protocol_parameters: None,
             api_timeout: DEFAULT_API_TIMEOUT,
             #[cfg(not(target_family = "wasm"))]
             max_parallel_api_requests: super::constants::MAX_PARALLEL_API_REQUESTS,
@@ -78,7 +77,7 @@ impl ClientBuilder {
 
     /// Set the fields from a client JSON config
     #[allow(unused_assignments)]
-    pub fn from_json(mut self, client_config: &str) -> Result<Self> {
+    pub fn from_json(mut self, client_config: &str) -> Result<Self, ClientError> {
         self = serde_json::from_str::<Self>(client_config)?;
         // validate URLs
         for node_dto in &self.node_manager_builder.primary_nodes {
@@ -93,31 +92,31 @@ impl ClientBuilder {
     }
 
     /// Adds an IOTA node by its URL.
-    pub fn with_node(mut self, url: &str) -> Result<Self> {
+    pub fn with_node(mut self, url: &str) -> Result<Self, ClientError> {
         self.node_manager_builder = self.node_manager_builder.with_node(url)?;
         Ok(self)
     }
 
     // Adds a node as primary node.
-    pub fn with_primary_node(mut self, node: Node) -> Result<Self> {
+    pub fn with_primary_node(mut self, node: Node) -> Result<Self, ClientError> {
         self.node_manager_builder = self.node_manager_builder.with_primary_node(node)?;
         Ok(self)
     }
 
     /// Adds a list of IOTA nodes by their URLs to the primary nodes list.
-    pub fn with_primary_nodes(mut self, urls: &[&str]) -> Result<Self> {
+    pub fn with_primary_nodes(mut self, urls: &[&str]) -> Result<Self, ClientError> {
         self.node_manager_builder = self.node_manager_builder.with_primary_nodes(urls)?;
         Ok(self)
     }
 
     /// Adds an IOTA node by its URL with optional jwt and or basic authentication
-    pub fn with_node_auth(mut self, url: &str, auth: impl Into<Option<NodeAuth>>) -> Result<Self> {
+    pub fn with_node_auth(mut self, url: &str, auth: impl Into<Option<NodeAuth>>) -> Result<Self, ClientError> {
         self.node_manager_builder = self.node_manager_builder.with_node_auth(url, auth)?;
         Ok(self)
     }
 
     /// Adds a list of IOTA nodes by their URLs.
-    pub fn with_nodes(mut self, urls: &[&str]) -> Result<Self> {
+    pub fn with_nodes(mut self, urls: &[&str]) -> Result<Self, ClientError> {
         self.node_manager_builder = self.node_manager_builder.with_nodes(urls)?;
         Ok(self)
     }
@@ -182,14 +181,20 @@ impl ClientBuilder {
         self
     }
 
+    /// Set the protocol parameters.
+    pub fn with_protocol_parameters(mut self, protocol_parameters: ProtocolParameters) -> Self {
+        self.protocol_parameters.replace(protocol_parameters);
+        self
+    }
+
     /// Build the Client instance.
     #[cfg(not(target_family = "wasm"))]
-    pub async fn finish(self) -> Result<Client> {
+    pub async fn finish(self) -> Result<Client, ClientError> {
         use tokio::sync::RwLock;
 
         let node_sync_interval = self.node_manager_builder.node_sync_interval;
         let ignore_node_health = self.node_manager_builder.ignore_node_health;
-        let nodes = self
+        let nodes: HashSet<Node> = self
             .node_manager_builder
             .primary_nodes
             .iter()
@@ -201,8 +206,9 @@ impl ClientBuilder {
         let (mqtt_event_tx, mqtt_event_rx) = tokio::sync::watch::channel(MqttEvent::Connected);
 
         let client_inner = Arc::new(ClientInner {
-            node_manager: RwLock::new(self.node_manager_builder.build(HashSet::new())),
-            network_info: RwLock::new(self.network_info),
+            // Initially assume all nodes are healthy, so `fetch_network_info()` works. `sync_nodes()` will afterwards
+            // update the healthy nodes.
+            node_manager: RwLock::new(self.node_manager_builder.build(nodes.clone())),
             api_timeout: RwLock::new(self.api_timeout),
             #[cfg(feature = "mqtt")]
             mqtt: super::MqttInner {
@@ -215,46 +221,66 @@ impl ClientBuilder {
             request_pool: crate::client::request_pool::RequestPool::new(self.max_parallel_api_requests),
         });
 
-        client_inner.sync_nodes(&nodes, ignore_node_health).await?;
-        let client_clone = client_inner.clone();
+        let network_info = match self.protocol_parameters {
+            Some(protocol_parameters) => NetworkInfo {
+                protocol_parameters,
+                tangle_time: None,
+            },
+            None => client_inner.fetch_network_info().await?,
+        };
+
+        let client = Client {
+            inner: client_inner,
+            network_info: Arc::new(RwLock::new(network_info)),
+            _sync_handle: Arc::new(RwLock::new(super::SyncHandle(None))),
+        };
+
+        client.sync_nodes(&nodes, ignore_node_health).await?;
+        let client_clone = client.clone();
 
         let sync_handle = tokio::spawn(async move {
             client_clone
                 .start_sync_process(nodes, node_sync_interval, ignore_node_health)
                 .await
         });
-
-        let client = Client {
-            inner: client_inner,
-            _sync_handle: Arc::new(RwLock::new(super::SyncHandle(Some(sync_handle)))),
-        };
+        *client._sync_handle.write().await = super::SyncHandle(Some(sync_handle));
 
         Ok(client)
     }
 
     /// Build the Client instance.
     #[cfg(target_family = "wasm")]
-    pub async fn finish(self) -> Result<Client> {
+    pub async fn finish(self) -> Result<Client, ClientError> {
         use tokio::sync::RwLock;
 
         #[cfg(feature = "mqtt")]
         let (mqtt_event_tx, mqtt_event_rx) = tokio::sync::watch::channel(MqttEvent::Connected);
 
+        let client_inner = ClientInner {
+            node_manager: RwLock::new(self.node_manager_builder.build(HashSet::new())),
+            api_timeout: RwLock::new(self.api_timeout),
+            #[cfg(feature = "mqtt")]
+            mqtt: super::MqttInner {
+                client: Default::default(),
+                topic_handlers: Default::default(),
+                broker_options: RwLock::new(self.broker_options),
+                sender: RwLock::new(mqtt_event_tx),
+                receiver: RwLock::new(mqtt_event_rx),
+            },
+            last_sync: tokio::sync::Mutex::new(None),
+        };
+
+        let network_info = match self.protocol_parameters {
+            Some(protocol_parameters) => NetworkInfo {
+                protocol_parameters,
+                tangle_time: None,
+            },
+            None => client_inner.fetch_network_info().await?,
+        };
+
         let client = Client {
-            inner: Arc::new(ClientInner {
-                node_manager: RwLock::new(self.node_manager_builder.build(HashSet::new())),
-                network_info: RwLock::new(self.network_info),
-                api_timeout: RwLock::new(self.api_timeout),
-                #[cfg(feature = "mqtt")]
-                mqtt: super::MqttInner {
-                    client: Default::default(),
-                    topic_handlers: Default::default(),
-                    broker_options: RwLock::new(self.broker_options),
-                    sender: RwLock::new(mqtt_event_tx),
-                    receiver: RwLock::new(mqtt_event_rx),
-                },
-                last_sync: tokio::sync::Mutex::new(None),
-            }),
+            inner: Arc::new(client_inner),
+            network_info: Arc::new(RwLock::new(network_info)),
         };
 
         Ok(client)
@@ -265,7 +291,7 @@ impl ClientBuilder {
             node_manager_builder: NodeManagerBuilder::from(&*client.node_manager.read().await),
             #[cfg(feature = "mqtt")]
             broker_options: *client.mqtt.broker_options.read().await,
-            network_info: client.network_info.read().await.clone(),
+            protocol_parameters: Some(client.network_info.read().await.protocol_parameters.clone()),
             api_timeout: client.get_timeout().await,
             #[cfg(not(target_family = "wasm"))]
             max_parallel_api_requests: client.request_pool.size().await,
@@ -274,12 +300,10 @@ impl ClientBuilder {
 }
 
 /// Struct containing network related information
-// TODO do we really want a default?
-#[derive(Clone, Default, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct NetworkInfo {
     /// Protocol parameters.
-    #[serde(default)]
     pub protocol_parameters: ProtocolParameters,
     /// The current tangle time.
     #[serde(skip)]

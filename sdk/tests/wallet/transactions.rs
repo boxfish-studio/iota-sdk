@@ -1,14 +1,14 @@
 // Copyright 2023 IOTA Stiftung
 // SPDX-License-Identifier: Apache-2.0
 
-use iota_sdk::wallet::{MintNftParams, Result, SendNftParams, SendParams, TransactionOptions};
-use pretty_assertions::assert_eq;
+// use iota_sdk::wallet::{MintNftParams, Result, SendNftParams, SendParams, TransactionOptions};
+// use pretty_assertions::assert_eq;
 
-use crate::wallet::common::{make_wallet, request_funds, setup, tear_down};
+// use crate::wallet::common::{make_wallet, request_funds, setup, tear_down};
 
 // #[ignore]
 // #[tokio::test]
-// async fn send_amount() -> Result<()> {
+// async fn send_amount() -> Result<(), WalletError> {
 //     let storage_path_0 = "test-storage/send_amount_0";
 //     setup(storage_path_0)?;
 //     let storage_path_1 = "test-storage/send_amount_1";
@@ -21,7 +21,7 @@ use crate::wallet::common::{make_wallet, request_funds, setup, tear_down};
 
 //     let amount = 1_000_000;
 //     let tx = wallet_0
-//         .send_with_params([SendParams::new(amount, wallet_1.address().await)?], None)
+//         .send_with_params([SendParams::new(amount, wallet_1.address().clone())?], None)
 //         .await?;
 
 //     wallet_0
@@ -36,7 +36,7 @@ use crate::wallet::common::{make_wallet, request_funds, setup, tear_down};
 
 // #[ignore]
 // #[tokio::test]
-// async fn send_amount_127_outputs() -> Result<()> {
+// async fn send_amount_127_outputs() -> Result<(), WalletError> {
 //     let storage_path_0 = "test-storage/send_amount_127_outputs_0";
 //     setup(storage_path_0)?;
 //     let storage_path_1 = "test-storage/send_amount_127_outputs_1";
@@ -53,7 +53,7 @@ use crate::wallet::common::{make_wallet, request_funds, setup, tear_down};
 //             vec![
 //                 SendParams::new(
 //                     amount,
-//                     wallet_1.address().await,
+//                     wallet_1.address().clone(),
 //                 )?;
 //                 // Only 127, because we need one remainder
 //                 127
@@ -74,7 +74,7 @@ use crate::wallet::common::{make_wallet, request_funds, setup, tear_down};
 
 // #[ignore]
 // #[tokio::test]
-// async fn send_amount_custom_input() -> Result<()> {
+// async fn send_amount_custom_input() -> Result<(), WalletError> {
 //     let storage_path_0 = "test-storage/send_amount_custom_input_0";
 //     setup(storage_path_0)?;
 //     let storage_path_1 = "test-storage/send_amount_custom_input_1";
@@ -121,7 +121,7 @@ use crate::wallet::common::{make_wallet, request_funds, setup, tear_down};
 
 // #[ignore]
 // #[tokio::test]
-// async fn send_nft() -> Result<()> {
+// async fn send_nft() -> Result<(), WalletError> {
 //     let storage_path_0 = "test-storage/send_nft_0";
 //     setup(storage_path_0)?;
 //     let storage_path_1 = "test-storage/send_nft_1";
@@ -133,7 +133,7 @@ use crate::wallet::common::{make_wallet, request_funds, setup, tear_down};
 //     let wallet_1 = make_wallet(storage_path_1, None, None).await?;
 
 //     let nft_options = [MintNftParams::new()
-//         .with_address(wallet_0.address().await)
+//         .with_address(wallet_0.address().clone())
 //         .with_metadata(b"some nft metadata".to_vec())
 //         .with_immutable_metadata(b"some immutable nft metadata".to_vec())];
 
@@ -146,7 +146,7 @@ use crate::wallet::common::{make_wallet, request_funds, setup, tear_down};
 //     // Send to wallet 1
 //     let transaction = wallet_0
 //         .send_nft(
-//             [SendNftParams::new(wallet_1.address().await, nft_id)?],
+//             [SendNftParams::new(wallet_1.address().clone(), nft_id)?],
 //             None,
 //         )
 //         .await
@@ -164,7 +164,7 @@ use crate::wallet::common::{make_wallet, request_funds, setup, tear_down};
 
 // #[ignore]
 // #[tokio::test]
-// async fn send_with_note() -> Result<()> {
+// async fn send_with_note() -> Result<(), WalletError> {
 //     let storage_path_0 = "test-storage/send_with_note_0";
 //     setup(storage_path_0)?;
 //     let storage_path_1 = "test-storage/send_with_note_1";
@@ -178,7 +178,7 @@ use crate::wallet::common::{make_wallet, request_funds, setup, tear_down};
 //     let amount = 1_000_000;
 //     let tx = wallet_0
 //         .send_with_params(
-//             [SendParams::new(amount, wallet_1.address().await)?],
+//             [SendParams::new(amount, wallet_1.address().clone())?],
 //             Some(TransactionOptions {
 //                 note: Some(String::from("send_with_note")),
 //                 ..Default::default()
@@ -193,7 +193,7 @@ use crate::wallet::common::{make_wallet, request_funds, setup, tear_down};
 
 // #[ignore]
 // #[tokio::test]
-// async fn conflicting_transaction() -> Result<()> {
+// async fn conflicting_transaction() -> Result<(), WalletError> {
 //     let storage_path_0 = "test-storage/conflicting_transaction_0";
 //     let storage_path_1 = "test-storage/conflicting_transaction_1";
 //     setup(storage_path_0)?;
@@ -213,7 +213,7 @@ use crate::wallet::common::{make_wallet, request_funds, setup, tear_down};
 //         .send_with_params(
 //             [SendParams::new(
 //                 1_000_000,
-//                 wallet_0.address().await,
+//                 wallet_0.address().clone(),
 //             )?],
 //             None,
 //         )
@@ -228,7 +228,7 @@ use crate::wallet::common::{make_wallet, request_funds, setup, tear_down};
 //                 // Something in the transaction must be different than in the first one, otherwise it will be the
 // same                 // one
 //                 2_000_000,
-//                 wallet_0.address().await,
+//                 wallet_0.address().clone(),
 //             )?],
 //             None,
 //         )
@@ -265,7 +265,7 @@ use crate::wallet::common::{make_wallet, request_funds, setup, tear_down};
 // #[tokio::test]
 // #[cfg(all(feature = "ledger_nano", feature = "events"))]
 // #[ignore = "requires ledger nano instance"]
-// async fn prepare_transaction_ledger() -> Result<()> {
+// async fn prepare_transaction_ledger() -> Result<(), WalletError> {
 //     use iota_sdk::wallet::events::{types::TransactionProgressEvent, WalletEvent, WalletEventType};
 
 //     let storage_path_0 = "test-storage/wallet_address_generation_ledger_0";
@@ -297,7 +297,7 @@ use crate::wallet::common::{make_wallet, request_funds, setup, tear_down};
 //         .await;
 
 //     let tx = wallet_0
-//         .send_with_params([SendParams::new(amount, wallet_1.address().await)?], None)
+//         .send_with_params([SendParams::new(amount, wallet_1.address().clone())?], None)
 //         .await?;
 
 //     let data = receiver.recv().await.expect("never received event");

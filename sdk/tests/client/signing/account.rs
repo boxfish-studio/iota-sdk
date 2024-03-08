@@ -6,20 +6,20 @@ use std::str::FromStr;
 use crypto::keys::bip44::Bip44;
 use iota_sdk::{
     client::{
-        api::{
-            transaction::validate_signed_transaction_payload_length, verify_semantic, GetAddressesOptions,
-            PreparedTransactionData,
-        },
+        api::{GetAddressesOptions, PreparedTransactionData},
         constants::SHIMMER_COIN_TYPE,
         secret::{SecretManage, SecretManager},
-        Client, Result,
+        Client,
     },
     types::block::{
         address::{AccountAddress, Address},
         input::{Input, UtxoInput},
         output::AccountId,
-        payload::{signed_transaction::Transaction, SignedTransactionPayload},
-        protocol::protocol_parameters,
+        payload::{
+            signed_transaction::{Transaction, TransactionCapabilityFlag},
+            SignedTransactionPayload,
+        },
+        protocol::iota_mainnet_protocol_parameters,
         slot::SlotIndex,
         unlock::{SignatureUnlock, Unlock},
     },
@@ -33,7 +33,7 @@ use crate::client::{
 };
 
 #[tokio::test]
-async fn sign_account_state_transition() -> Result<()> {
+async fn sign_account_state_transition() -> Result<(), Box<dyn std::error::Error>> {
     let secret_manager = SecretManager::try_from_mnemonic(Client::generate_mnemonic()?)?;
 
     let address = secret_manager
@@ -46,7 +46,7 @@ async fn sign_account_state_transition() -> Result<()> {
         .clone()
         .into_inner();
 
-    let protocol_parameters = protocol_parameters();
+    let protocol_parameters = iota_mainnet_protocol_parameters();
     let account_id = AccountId::from_str(ACCOUNT_ID_1)?;
     let slot_index = SlotIndex::from(10);
 
@@ -54,7 +54,8 @@ async fn sign_account_state_transition() -> Result<()> {
         [(
             Account {
                 amount: 1_000_000,
-                account_id: account_id,
+                mana: 0,
+                account_id,
                 address: address.clone(),
                 sender: None,
                 issuer: None,
@@ -66,7 +67,8 @@ async fn sign_account_state_transition() -> Result<()> {
 
     let outputs = build_outputs([Account {
         amount: 1_000_000,
-        account_id: account_id,
+        mana: 0,
+        account_id,
         address: address.clone(),
         sender: None,
         issuer: None,
@@ -81,7 +83,8 @@ async fn sign_account_state_transition() -> Result<()> {
         )
         .with_outputs(outputs)
         .with_creation_slot(slot_index + 1)
-        .finish_with_params(&protocol_parameters)?;
+        .with_capabilities([TransactionCapabilityFlag::BurnMana])
+        .finish_with_params(protocol_parameters)?;
 
     let prepared_transaction_data = PreparedTransactionData {
         transaction,
@@ -91,7 +94,7 @@ async fn sign_account_state_transition() -> Result<()> {
     };
 
     let unlocks = secret_manager
-        .transaction_unlocks(&prepared_transaction_data, &protocol_parameters)
+        .transaction_unlocks(&prepared_transaction_data, protocol_parameters)
         .await?;
 
     assert_eq!(unlocks.len(), 1);
@@ -99,24 +102,15 @@ async fn sign_account_state_transition() -> Result<()> {
 
     let tx_payload = SignedTransactionPayload::new(prepared_transaction_data.transaction.clone(), unlocks)?;
 
-    validate_signed_transaction_payload_length(&tx_payload)?;
+    tx_payload.validate_length()?;
 
-    let conflict = verify_semantic(
-        &prepared_transaction_data.inputs_data,
-        &tx_payload,
-        prepared_transaction_data.mana_rewards,
-        protocol_parameters,
-    )?;
-
-    if let Some(conflict) = conflict {
-        panic!("{conflict:?}, with {tx_payload:#?}");
-    }
+    prepared_transaction_data.verify_semantic(protocol_parameters)?;
 
     Ok(())
 }
 
 #[tokio::test]
-async fn account_reference_unlocks() -> Result<()> {
+async fn account_reference_unlocks() -> Result<(), Box<dyn std::error::Error>> {
     let secret_manager = SecretManager::try_from_mnemonic(Client::generate_mnemonic()?)?;
 
     let address = secret_manager
@@ -129,7 +123,7 @@ async fn account_reference_unlocks() -> Result<()> {
         .clone()
         .into_inner();
 
-    let protocol_parameters = protocol_parameters();
+    let protocol_parameters = iota_mainnet_protocol_parameters();
     let account_id = AccountId::from_str(ACCOUNT_ID_1)?;
     let account_address = Address::Account(AccountAddress::new(account_id));
     let slot_index = SlotIndex::from(10);
@@ -139,7 +133,8 @@ async fn account_reference_unlocks() -> Result<()> {
             (
                 Account {
                     amount: 1_000_000,
-                    account_id: account_id,
+                    mana: 0,
+                    account_id,
                     address: address.clone(),
                     sender: None,
                     issuer: None,
@@ -149,6 +144,7 @@ async fn account_reference_unlocks() -> Result<()> {
             (
                 Basic {
                     amount: 1_000_000,
+                    mana: 0,
                     address: account_address.clone(),
                     native_token: None,
                     sender: None,
@@ -161,6 +157,7 @@ async fn account_reference_unlocks() -> Result<()> {
             (
                 Basic {
                     amount: 1_000_000,
+                    mana: 0,
                     address: account_address.clone(),
                     native_token: None,
                     sender: None,
@@ -177,13 +174,15 @@ async fn account_reference_unlocks() -> Result<()> {
     let outputs = build_outputs([
         Account {
             amount: 1_000_000,
-            account_id: account_id,
-            address: address,
+            mana: 0,
+            account_id,
+            address,
             sender: None,
             issuer: None,
         },
         Basic {
             amount: 2_000_000,
+            mana: 0,
             address: account_address,
             native_token: None,
             sender: None,
@@ -202,7 +201,8 @@ async fn account_reference_unlocks() -> Result<()> {
         )
         .with_outputs(outputs)
         .with_creation_slot(slot_index + 1)
-        .finish_with_params(&protocol_parameters)?;
+        .with_capabilities([TransactionCapabilityFlag::BurnMana])
+        .finish_with_params(protocol_parameters)?;
 
     let prepared_transaction_data = PreparedTransactionData {
         transaction,
@@ -212,7 +212,7 @@ async fn account_reference_unlocks() -> Result<()> {
     };
 
     let unlocks = secret_manager
-        .transaction_unlocks(&prepared_transaction_data, &protocol_parameters)
+        .transaction_unlocks(&prepared_transaction_data, protocol_parameters)
         .await?;
 
     assert_eq!(unlocks.len(), 3);
@@ -232,18 +232,9 @@ async fn account_reference_unlocks() -> Result<()> {
 
     let tx_payload = SignedTransactionPayload::new(prepared_transaction_data.transaction.clone(), unlocks)?;
 
-    validate_signed_transaction_payload_length(&tx_payload)?;
+    tx_payload.validate_length()?;
 
-    let conflict = verify_semantic(
-        &prepared_transaction_data.inputs_data,
-        &tx_payload,
-        prepared_transaction_data.mana_rewards,
-        protocol_parameters,
-    )?;
-
-    if let Some(conflict) = conflict {
-        panic!("{conflict:?}, with {tx_payload:#?}");
-    }
+    prepared_transaction_data.verify_semantic(protocol_parameters)?;
 
     Ok(())
 }

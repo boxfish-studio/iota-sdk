@@ -5,10 +5,9 @@ from __future__ import annotations
 import json
 from typing import TYPE_CHECKING, List, Optional
 from iota_sdk.common import custom_encoder
-
 from iota_sdk.types.block.id import BlockId
 from iota_sdk.types.signature import Ed25519Signature
-from iota_sdk.types.address import Address, deserialize_address
+from iota_sdk.types.address import Address, Ed25519Address, deserialize_address
 from iota_sdk.types.common import HexStr
 from iota_sdk.types.decayed_mana import DecayedMana
 from iota_sdk.types.payload import Transaction, SignedTransactionPayload
@@ -30,53 +29,24 @@ if TYPE_CHECKING:
 class Utils:
     """Utility functions.
     """
-
     @staticmethod
-    def bech32_to_hex(bech32: str) -> HexStr:
-        """Convert a Bech32 string to a hex string.
+    def address_to_bech32(address: Address, bech32_hrp: str) -> str:
+        """Convert an address to its bech32 representation.
         """
-        return _call_method('bech32ToHex', {
-            'bech32': bech32
-        })
-
-    # pylint: disable=redefined-builtin
-    @staticmethod
-    def hex_to_bech32(hex_str: HexStr, bech32_hrp: str) -> str:
-        """Convert a hex encoded address to a Bech32 encoded address.
-        """
-        return _call_method('hexToBech32', {
-            'hex': hex_str,
-            'bech32Hrp': bech32_hrp
-        })
-
-    @staticmethod
-    def account_id_to_bech32(account_id: HexStr, bech32_hrp: str) -> str:
-        """Convert an account id to a Bech32 encoded address.
-        """
-        return _call_method('accountIdToBech32', {
-            'accountId': account_id,
-            'bech32Hrp': bech32_hrp
-        })
-
-    @staticmethod
-    def nft_id_to_bech32(nft_id: HexStr, bech32_hrp: str) -> str:
-        """Convert an NFT ID to a Bech32 encoded address.
-        """
-        return _call_method('nftIdToBech32', {
-            'nftId': nft_id,
+        return _call_method('addressToBech32', {
+            'address': address,
             'bech32Hrp': bech32_hrp
         })
 
     # pylint: disable=redefined-builtin
     @staticmethod
-    def hex_public_key_to_bech32_address(
-            hex_str: HexStr, bech32_hrp: str) -> str:
-        """Convert a hex encoded public key to a Bech32 encoded address.
+    def public_key_hash(
+            hex_str: HexStr) -> Ed25519Address:
+        """Hashes a hex encoded public key with Blake2b256.
         """
-        return _call_method('hexPublicKeyToBech32Address', {
-            'hex': hex_str,
-            'bech32Hrp': bech32_hrp
-        })
+        return Ed25519Address(_call_method('blake2b256Hash', {
+            'bytes': hex_str,
+        }))
 
     @staticmethod
     def parse_bech32_address(address: str) -> Address:
@@ -114,8 +84,8 @@ class Utils:
     def compute_account_id(output_id: OutputId) -> HexStr:
         """Compute the account id for the given account output id.
         """
-        return _call_method('computeAccountId', {
-            'outputId': repr(output_id)
+        return _call_method('blake2b256Hash', {
+            'bytes': repr(output_id)
         })
 
     @staticmethod
@@ -142,8 +112,8 @@ class Utils:
     def compute_nft_id(output_id: OutputId) -> HexStr:
         """Compute the NFT id for the given NFT output id.
         """
-        return _call_method('computeNftId', {
-            'outputId': repr(output_id)
+        return _call_method('blake2b256Hash', {
+            'bytes': repr(output_id)
         })
 
     @staticmethod
@@ -151,7 +121,7 @@ class Utils:
                           index: int) -> OutputId:
         """Compute the output id from transaction id and output index.
         """
-        return OutputId.from_string(_call_method('computeOutputId', {
+        return OutputId(_call_method('computeOutputId', {
             'id': transaction_id,
             'index': index,
         }))
@@ -223,10 +193,10 @@ class Utils:
 
     @staticmethod
     def verify_transaction_semantic(
-            transaction: Transaction, inputs: List[InputSigningData], protocol_parameters: ProtocolParameters, unlocks: Optional[List[Unlock]] = None, mana_rewards: Optional[dict[OutputId, int]] = None) -> str:
+            transaction: Transaction, inputs: List[InputSigningData], protocol_parameters: ProtocolParameters, unlocks: Optional[List[Unlock]] = None, mana_rewards: Optional[dict[OutputId, int]] = None):
         """Verifies the semantic of a transaction.
         """
-        return _call_method('verifyTransactionSemantic', {
+        _call_method('verifyTransactionSemantic', {
             'transaction': transaction,
             'inputs': inputs,
             'unlocks': unlocks,
@@ -293,6 +263,20 @@ class Utils:
         return bytes(_call_method('blockBytes', {
             'block': block.as_dict(),
         }))
+
+    @staticmethod
+    def iota_mainnet_protocol_parameters() -> ProtocolParameters:
+        """Returns sample protocol parameters for IOTA mainnet.
+        """
+        return ProtocolParameters.from_dict(
+            _call_method('iotaMainnetProtocolParameters'))
+
+    @staticmethod
+    def shimmer_mainnet_protocol_parameters() -> ProtocolParameters:
+        """Returns sample protocol parameters for Shimmer mainnet.
+        """
+        return ProtocolParameters.from_dict(
+            _call_method('shimmerMainnetProtocolParameters'))
 
 
 class UtilsError(Exception):

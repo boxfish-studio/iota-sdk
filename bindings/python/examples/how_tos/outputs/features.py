@@ -2,11 +2,9 @@ import json
 from dataclasses import asdict
 
 from dotenv import load_dotenv
-
 from iota_sdk import (
     AddressUnlockCondition,
     Client,
-    Ed25519Address,
     Utils,
     SenderFeature,
     IssuerFeature,
@@ -19,12 +17,10 @@ load_dotenv()
 
 client = Client()
 
-hex_address = Utils.bech32_to_hex(
+address = Utils.parse_bech32_address(
     'rms1qpllaj0pyveqfkwxmnngz2c488hfdtmfrj3wfkgxtk4gtyrax0jaxzt70zy')
 
-address_unlock_condition = AddressUnlockCondition(
-    Ed25519Address(hex_address)
-)
+address_unlock_condition = AddressUnlockCondition(address)
 
 # Output with sender feature
 nft_output = client.build_nft_output(
@@ -33,7 +29,7 @@ nft_output = client.build_nft_output(
         address_unlock_condition
     ],
     features=[
-        SenderFeature(Ed25519Address(hex_address))
+        SenderFeature(address)
     ],
 )
 outputs = [nft_output]
@@ -45,7 +41,7 @@ nft_output = client.build_nft_output(
         address_unlock_condition,
     ],
     immutable_features=[
-        IssuerFeature(Ed25519Address(hex_address))
+        IssuerFeature(address)
     ],
 )
 outputs.append(nft_output)
@@ -57,7 +53,7 @@ nft_output = client.build_nft_output(
         address_unlock_condition,
     ],
     features=[
-        MetadataFeature(utf8_to_hex('Hello, World!'))
+        MetadataFeature({'data': utf8_to_hex('Hello, World!')})
     ],
 )
 outputs.append(nft_output)
@@ -69,7 +65,7 @@ nft_output = client.build_nft_output(
         address_unlock_condition,
     ],
     immutable_features=[
-        MetadataFeature(utf8_to_hex('Hello, World!'))
+        MetadataFeature({'data': utf8_to_hex('Hello, World!')})
     ],
 )
 outputs.append(nft_output)

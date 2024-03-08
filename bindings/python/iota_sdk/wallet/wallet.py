@@ -4,7 +4,6 @@
 from json import dumps
 from typing import List, Optional, Union
 from dataclasses import dataclass
-
 from iota_sdk import destroy_wallet, create_wallet, listen_wallet, get_client_from_wallet, get_secret_manager_from_wallet, Client
 from iota_sdk.secret_manager.secret_manager import LedgerNanoSecretManager, MnemonicSecretManager, StrongholdSecretManager, SeedSecretManager, SecretManager
 from iota_sdk.wallet.common import _call_wallet_method_routine
@@ -23,7 +22,7 @@ from iota_sdk.types.output import BasicOutput, NftOutput, Output, deserialize_ou
 from iota_sdk.types.output_params import OutputParams
 from iota_sdk.types.transaction_data import PreparedTransactionData, SignedTransactionData
 from iota_sdk.types.transaction_id import TransactionId
-from iota_sdk.types.send_params import BeginStakingParams, CreateAccountOutputParams, CreateDelegationParams, CreateNativeTokenParams, MintNftParams, SendNativeTokenParams, SendNftParams, SendParams
+from iota_sdk.types.send_params import BeginStakingParams, CreateAccountOutputParams, CreateDelegationParams, CreateNativeTokenParams, MintNftParams, SendManaParams, SendNativeTokenParams, SendNftParams, SendParams
 from iota_sdk.types.signature import Bip44
 from iota_sdk.types.transaction_with_metadata import CreateDelegationTransaction, CreateNativeTokenTransaction, TransactionWithMetadata
 from iota_sdk.types.transaction_options import TransactionOptions
@@ -73,7 +72,7 @@ class Wallet:
             message['data'] = data
         return message
 
-    def backup(self, destination: str, password: str):
+    def backup_to_stronghold_snapshot(self, destination: str, password: str):
         """Backup storage.
         """
         return self._call_method(
@@ -150,7 +149,7 @@ class Wallet:
             }
         )
 
-    def restore_backup(self, source: str, password: str):
+    def restore_from_stronghold_snapshot(self, source: str, password: str):
         """Restore a backup from a Stronghold file.
         Replaces `client_options`, `coin_type`, `secret_manager` and wallet.
         Returns an error if the wallet was already created. If Stronghold is used
@@ -592,18 +591,6 @@ class Wallet:
             })
         )
 
-    def prepare_send(self, params: List[SendParams],
-                     options: Optional[TransactionOptions] = None) -> PreparedTransaction:
-        """Prepare to send base coins.
-        """
-        prepared = PreparedTransactionData.from_dict(self._call_method(
-            'prepareSend', {
-                'params': params,
-                'options': options
-            }
-        ))
-        return PreparedTransaction(self, prepared)
-
     def create_delegation(self, params: CreateDelegationParams,
                           options: Optional[TransactionOptions] = None) -> CreateDelegationTransaction:
         """Create a delegation.
@@ -702,18 +689,18 @@ class Wallet:
             }
         ))
 
-    def send_transaction(
+    def send_outputs(
             self, outputs: List[Output], options: Optional[TransactionOptions] = None) -> TransactionWithMetadata:
-        """Send a transaction.
+        """Send outputs.
         """
-        return self.prepare_transaction(outputs, options).send()
+        return self.prepare_send_outputs(outputs, options).send()
 
-    def prepare_transaction(
+    def prepare_send_outputs(
             self, outputs: List[Output], options: Optional[TransactionOptions] = None) -> PreparedTransaction:
-        """Prepare transaction.
+        """Prepare to send outputs.
         """
         prepared = PreparedTransactionData.from_dict(self._call_method(
-            'prepareTransaction', {
+            'prepareSendOutputs', {
                 'outputs': outputs,
                 'options': options
             }
@@ -721,40 +708,40 @@ class Wallet:
         return PreparedTransaction(self, prepared)
 
     def wait_for_transaction_acceptance(
-            self, transaction_id: TransactionId, interval=None, max_attempts=None) -> BlockId:
-        """Checks the transaction state for a provided transaction id until it's accepted. Interval in milliseconds. Returns the block id that
-        contains this transaction.
+            self, transaction_id: TransactionId, interval=None, max_attempts=None):
+        """Checks the transaction state for a provided transaction id until it's accepted. Interval in milliseconds.
         """
-        return BlockId(self._call_method(
+        return self._call_method(
             'waitForTransactionAcceptance', {
                 'transactionId': transaction_id,
                 'interval': interval,
                 'maxAttempts': max_attempts
             }
-        ))
+        )
 
     def send(self, amount: int, address: str,
              options: Optional[TransactionOptions] = None) -> TransactionWithMetadata:
         """Send base coins.
         """
-        return TransactionWithMetadata.from_dict(self._call_method(
-            'send', {
-                'amount': str(amount),
-                'address': address,
-                'options': options
-            }
-        ))
+        return self.prepare_send([SendParams(address, amount)], options).send()
 
     def send_with_params(
             self, params: List[SendParams], options: Optional[TransactionOptions] = None) -> TransactionWithMetadata:
         """Send base coins to multiple addresses or with additional parameters.
         """
-        return TransactionWithMetadata.from_dict(self._call_method(
-            'sendWithParams', {
-                'params': [param.to_dict() for param in params],
+        return self.prepare_send(params, options).send()
+
+    def prepare_send(self, params: List[SendParams],
+                     options: Optional[TransactionOptions] = None) -> PreparedTransaction:
+        """Prepare to send with params.
+        """
+        prepared = PreparedTransactionData.from_dict(self._call_method(
+            'prepareSend', {
+                'params': params,
                 'options': options
             }
         ))
+        return PreparedTransaction(self, prepared)
 
     def send_native_tokens(
             self, params: List[SendNativeTokenParams], options: Optional[TransactionOptions] = None) -> TransactionWithMetadata:
@@ -794,16 +781,23 @@ class Wallet:
         ))
         return PreparedTransaction(self, prepared)
 
-    def send_outputs(
-            self, outputs: List[Output], options: Optional[TransactionOptions] = None) -> TransactionWithMetadata:
-        """Send outputs in a transaction.
+    def send_mana(
+            self, params: SendManaParams, options: Optional[TransactionOptions] = None) -> TransactionWithMetadata:
+        """Send mana.
         """
-        return TransactionWithMetadata.from_dict(self._call_method(
-            'sendOutputs', {
-                'outputs': outputs,
-                'options': options,
+        return self.prepare_send_mana(params, options).send()
+
+    def prepare_send_mana(self, params: SendManaParams,
+                          options: Optional[TransactionOptions] = None) -> PreparedTransaction:
+        """Prepare to send mana.
+        """
+        prepared = PreparedTransactionData.from_dict(self._call_method(
+            'prepareSendMana', {
+                'params': params,
+                'options': options
             }
         ))
+        return PreparedTransaction(self, prepared)
 
     def set_alias(self, alias: str):
         """Set alias.

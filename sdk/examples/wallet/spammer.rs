@@ -20,7 +20,7 @@ use iota_sdk::{
         output::BasicOutput,
         payload::signed_transaction::TransactionId,
     },
-    wallet::{ClientOptions, FilterOptions, Result, SendParams, Wallet},
+    wallet::{ClientOptions, FilterOptions, SendParams, Wallet},
 };
 
 // The number of spamming rounds.
@@ -31,7 +31,7 @@ const SEND_AMOUNT: u64 = 1_000_000;
 const NUM_SIMULTANEOUS_TXS: usize = 16;
 
 #[tokio::main(flavor = "multi_thread")]
-async fn main() -> Result<()> {
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // This example uses secrets in environment variables for simplicity which should not be done in production.
     dotenvy::dotenv().ok();
 
@@ -48,20 +48,10 @@ async fn main() -> Result<()> {
     let secret_manager = MnemonicSecretManager::try_from_mnemonic(std::env::var("MNEMONIC").unwrap())?;
 
     let bip_path = Bip44::new(SHIMMER_COIN_TYPE);
-    let address = Bech32Address::new(
-        Hrp::from_str_unchecked("smr"),
-        Address::from(
-            secret_manager
-                .generate_ed25519_addresses(bip_path.coin_type, bip_path.account, 0..1, None)
-                .await?[0],
-        ),
-    );
-
     let wallet = Wallet::builder()
         .with_secret_manager(SecretManager::Mnemonic(secret_manager))
         .with_client_options(client_options)
         .with_bip_path(bip_path)
-        .with_address(address)
         .finish()
         .await?;
 
@@ -74,7 +64,7 @@ async fn main() -> Result<()> {
     // We make sure that for all threads there are always inputs available to
     // fund the transaction, otherwise we create enough unspent outputs.
     let num_unspent_basic_outputs_with_send_amount = wallet
-        .data()
+        .ledger()
         .await
         .filtered_unspent_outputs(FilterOptions {
             output_types: Some(vec![BasicOutput::KIND]),
@@ -101,7 +91,7 @@ async fn main() -> Result<()> {
         println!("ROUND {i}/{NUM_ROUNDS}");
         let round_timer = tokio::time::Instant::now();
 
-        let mut tasks = tokio::task::JoinSet::<std::result::Result<(), (usize, iota_sdk::wallet::Error)>>::new();
+        let mut tasks = tokio::task::JoinSet::<std::result::Result<(), (usize, iota_sdk::wallet::WalletError)>>::new();
 
         for n in 0..num_simultaneous_txs {
             let recv_address = recv_address.clone();
@@ -160,7 +150,10 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
-async fn ensure_enough_funds(wallet: &Wallet, bech32_address: &Bech32Address) -> Result<()> {
+async fn ensure_enough_funds(
+    wallet: &Wallet,
+    bech32_address: &Bech32Address,
+) -> Result<(), Box<dyn std::error::Error>> {
     let balance = wallet.sync(None).await?;
     let available_funds = balance.base_coin().available();
     println!("Available funds: {available_funds}");
@@ -201,20 +194,21 @@ async fn ensure_enough_funds(wallet: &Wallet, bech32_address: &Bech32Address) ->
     }
 }
 
-async fn wait_for_inclusion(transaction_id: &TransactionId, wallet: &Wallet) -> Result<()> {
+async fn wait_for_inclusion(transaction_id: &TransactionId, wallet: &Wallet) -> Result<(), Box<dyn std::error::Error>> {
     println!(
         "Transaction sent: {}/transaction/{}",
         std::env::var("EXPLORER_URL").unwrap(),
         transaction_id
     );
-    // Wait for transaction to get accepted
-    let block_id = wallet
+    wallet
         .wait_for_transaction_acceptance(transaction_id, None, None)
         .await?;
+
     println!(
-        "Tx accepted in block: {}/block/{}",
+        "Tx accepted: {}/transactions/{}",
         std::env::var("EXPLORER_URL").unwrap(),
-        block_id
+        transaction_id
     );
+
     Ok(())
 }

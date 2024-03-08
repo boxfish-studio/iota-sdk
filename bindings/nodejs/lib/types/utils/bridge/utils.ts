@@ -10,9 +10,9 @@ import {
     Block,
     ProtocolParameters,
     OutputId,
-    NftId,
     Bech32Address,
     Unlock,
+    Address,
 } from '../../';
 import { AccountId } from '../../block/id';
 import { SlotCommitment } from '../../block/slot';
@@ -30,13 +30,6 @@ export interface __MnemonicToHexSeedMethod__ {
     };
 }
 
-export interface __ComputeAccountIdMethod__ {
-    name: 'computeAccountId';
-    data: {
-        outputId: OutputId;
-    };
-}
-
 export interface __ComputeFoundryIdMethod__ {
     name: 'computeFoundryId';
     data: {
@@ -46,10 +39,10 @@ export interface __ComputeFoundryIdMethod__ {
     };
 }
 
-export interface __ComputeNftIdMethod__ {
-    name: 'computeNftId';
+export interface __Blake2b256HashMethod__ {
+    name: 'blake2b256Hash';
     data: {
-        outputId: OutputId;
+        bytes: HexEncodedString;
     };
 }
 
@@ -100,42 +93,11 @@ export interface __TransactionIdMethod__ {
     };
 }
 
-export interface __Bech32ToHexMethod__ {
-    name: 'bech32ToHex';
+export interface __AddressToBech32Method__ {
+    name: 'addressToBech32';
     data: {
-        bech32: Bech32Address;
-    };
-}
-
-export interface __HexToBech32Method__ {
-    name: 'hexToBech32';
-    data: {
-        hex: HexEncodedString;
-        bech32Hrp?: string;
-    };
-}
-
-export interface __AccountIdToBech32Method__ {
-    name: 'accountIdToBech32';
-    data: {
-        accountId: AccountId;
-        bech32Hrp?: string;
-    };
-}
-
-export interface __NftIdToBech32Method__ {
-    name: 'nftIdToBech32';
-    data: {
-        nftId: NftId;
-        bech32Hrp?: string;
-    };
-}
-
-export interface __HexPublicKeyToBech32AddressMethod__ {
-    name: 'hexPublicKeyToBech32Address';
-    data: {
-        hex: HexEncodedString;
-        bech32Hrp?: string;
+        address: Address;
+        bech32Hrp: string;
     };
 }
 
@@ -271,4 +233,12 @@ export interface __BlockBytes__ {
     data: {
         block: Block;
     };
+}
+
+export interface __IotaMainnetProtocolParameters__ {
+    name: 'iotaMainnetProtocolParameters';
+}
+
+export interface __ShimmerMainnetProtocolParameters__ {
+    name: 'shimmerMainnetProtocolParameters';
 }

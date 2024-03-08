@@ -8,10 +8,10 @@
 //! cargo run --release --all-features --example list_outputs
 //! ```
 
-use iota_sdk::{wallet::Result, Wallet};
+use iota_sdk::Wallet;
 
 #[tokio::main]
-async fn main() -> Result<()> {
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // This example uses secrets in environment variables for simplicity which should not be done in production.
     dotenvy::dotenv().ok();
 
@@ -29,13 +29,13 @@ async fn main() -> Result<()> {
 
     // Print output ids
     println!("Output ids:");
-    for output in wallet.data().await.outputs().values() {
+    for output in wallet.ledger().await.outputs().values() {
         println!("{}", output.output_id);
     }
 
     // Print unspent output ids
     println!("Unspent output ids:");
-    for output in wallet.data().await.unspent_outputs().values() {
+    for output in wallet.ledger().await.unspent_outputs().values() {
         println!("{}", output.output_id);
     }
 

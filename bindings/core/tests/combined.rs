@@ -17,14 +17,14 @@ use iota_sdk::{
     },
 };
 use iota_sdk_bindings_core::{
-    call_client_method, call_secret_manager_method, CallMethod, ClientMethod, Response, Result, SecretManagerMethod,
+    call_client_method, call_secret_manager_method, CallMethod, ClientMethod, Error, Response, SecretManagerMethod,
     WalletMethod, WalletOptions,
 };
 use pretty_assertions::assert_eq;
 
 #[cfg(feature = "storage")]
 #[tokio::test]
-async fn create_wallet() -> Result<()> {
+async fn create_wallet() -> Result<(), Error> {
     let storage_path = "test-storage/create_wallet";
     std::fs::remove_dir_all(storage_path).ok();
 
@@ -41,7 +41,12 @@ async fn create_wallet() -> Result<()> {
 
     let wallet = WalletOptions::default()
         .with_storage_path(storage_path.to_string())
-        .with_client_options(ClientBuilder::new().from_json(client_options).unwrap())
+        .with_client_options(
+            ClientBuilder::new()
+                .from_json(client_options)
+                .unwrap()
+                .with_protocol_parameters(iota_sdk::types::block::protocol::iota_mainnet_protocol_parameters().clone()),
+        )
         .with_bip_path(Bip44::new(SHIMMER_COIN_TYPE))
         .with_secret_manager(serde_json::from_str::<SecretManagerDto>(secret_manager).unwrap())
         .build()
@@ -62,7 +67,7 @@ async fn create_wallet() -> Result<()> {
 
 #[cfg(feature = "storage")]
 #[tokio::test]
-async fn client_from_wallet() -> Result<()> {
+async fn client_from_wallet() -> Result<(), Error> {
     let storage_path = "test-storage/client_from_wallet";
     std::fs::remove_dir_all(storage_path).ok();
 
@@ -79,7 +84,12 @@ async fn client_from_wallet() -> Result<()> {
 
     let wallet = WalletOptions::default()
         .with_storage_path(storage_path.to_string())
-        .with_client_options(ClientBuilder::new().from_json(client_options).unwrap())
+        .with_client_options(
+            ClientBuilder::new()
+                .from_json(client_options)
+                .unwrap()
+                .with_protocol_parameters(iota_sdk::types::block::protocol::iota_mainnet_protocol_parameters().clone()),
+        )
         .with_bip_path(Bip44::new(SHIMMER_COIN_TYPE))
         .with_secret_manager(serde_json::from_str::<SecretManagerDto>(secret_manager).unwrap())
         .build()

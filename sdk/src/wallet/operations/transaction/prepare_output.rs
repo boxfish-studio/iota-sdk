@@ -4,7 +4,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    client::secret::SecretManage,
+    client::{api::options::RemainderValueStrategy, secret::SecretManage, ClientError},
     types::block::{
         address::{Address, Bech32Address, Ed25519Address},
         output::{
@@ -17,21 +17,13 @@ use crate::{
             StorageScoreParameters, UnlockCondition,
         },
         slot::SlotIndex,
-        Error,
+        BlockError,
     },
     utils::serde::string,
-    wallet::{
-        operations::transaction::{RemainderValueStrategy, TransactionOptions},
-        types::OutputData,
-        Wallet,
-    },
+    wallet::{operations::transaction::TransactionOptions, types::OutputData, Wallet, WalletError},
 };
 
-impl<S: 'static + SecretManage> Wallet<S>
-where
-    crate::wallet::Error: From<S::Error>,
-    crate::client::Error: From<S::Error>,
-{
+impl<S: 'static + SecretManage> Wallet<S> {
     /// Prepare a basic or NFT output for sending
     /// If the amount is below the minimum required storage deposit, by default the remaining amount will automatically
     /// be added with a StorageDepositReturn UnlockCondition, when setting the ReturnStrategy to `gift`, the full
@@ -42,7 +34,7 @@ where
         &self,
         params: OutputParams,
         transaction_options: impl Into<Option<TransactionOptions>> + Send,
-    ) -> crate::wallet::Result<Output> {
+    ) -> Result<Output, WalletError> {
         log::debug!("[OUTPUT] prepare_output {params:?}");
         let transaction_options = transaction_options.into();
 
@@ -59,7 +51,7 @@ where
         if let Some(features) = params.features {
             if let Some(tag) = features.tag {
                 first_output_builder = first_output_builder.add_feature(TagFeature::new(
-                    prefix_hex::decode::<Vec<u8>>(tag).map_err(|_| Error::InvalidField("tag"))?,
+                    prefix_hex::decode::<Vec<u8>>(tag).map_err(ClientError::PrefixHex)?,
                 )?);
             }
 
@@ -73,7 +65,7 @@ where
 
             if let Some(issuer) = features.issuer {
                 if let OutputBuilder::Basic(_) = first_output_builder {
-                    return Err(crate::wallet::Error::MissingParameter("nft_id"));
+                    return Err(WalletError::MissingParameter("nft_id"));
                 }
                 first_output_builder = first_output_builder.add_immutable_feature(IssuerFeature::new(issuer));
             }
@@ -113,7 +105,7 @@ where
         let min_amount_basic_output =
             BasicOutput::minimum_amount(&Address::from(Ed25519Address::null()), storage_score_params);
 
-        let min_required_storage_deposit = first_output.minimum_amount(storage_score_params);
+        let min_required_storage_deposit = first_output.amount();
 
         if params.amount > min_required_storage_deposit {
             second_output_builder = second_output_builder.with_amount(params.amount);
@@ -177,7 +169,7 @@ where
         }
 
         if final_amount > available_base_coin {
-            return Err(crate::wallet::Error::InsufficientFunds {
+            return Err(WalletError::InsufficientFunds {
                 available: available_base_coin,
                 required: final_amount,
             });
@@ -216,7 +208,7 @@ where
                     }
                 } else {
                     // Would leave dust behind, so return what's required for a remainder
-                    return Err(crate::wallet::Error::InsufficientFunds {
+                    return Err(WalletError::InsufficientFunds {
                         available: available_base_coin,
                         required: available_base_coin + min_amount_basic_output - remaining_balance,
                     });
@@ -233,7 +225,7 @@ where
         recipient_address: Bech32Address,
         nft_id: Option<NftId>,
         params: StorageScoreParameters,
-    ) -> crate::wallet::Result<(OutputBuilder, Option<OutputData>)> {
+    ) -> Result<(OutputBuilder, Option<OutputData>), WalletError> {
         let (mut first_output_builder, existing_nft_output_data) = if let Some(nft_id) = &nft_id {
             if nft_id.is_null() {
                 // Mint a new NFT output
@@ -243,14 +235,14 @@ where
                 )
             } else {
                 // Transition an existing NFT output
-                let unspent_nft_output = self.data().await.unspent_nft_output(nft_id).cloned();
+                let unspent_nft_output = self.ledger().await.unspent_nft_output(nft_id).cloned();
 
                 // Find nft output from the inputs
                 let mut first_output_builder = if let Some(nft_output_data) = &unspent_nft_output {
                     let nft_output = nft_output_data.output.as_nft();
                     NftOutputBuilder::from(nft_output).with_nft_id(*nft_id)
                 } else {
-                    return Err(crate::wallet::Error::NftNotFoundInUnspentOutputs);
+                    return Err(WalletError::NftNotFoundInUnspentOutputs);
                 };
                 // Remove potentially existing features and unlock conditions.
                 first_output_builder = first_output_builder.clear_features();
@@ -274,7 +266,7 @@ where
     async fn get_remainder_address(
         &self,
         transaction_options: impl Into<Option<TransactionOptions>> + Send,
-    ) -> crate::wallet::Result<Address> {
+    ) -> Result<Address, WalletError> {
         let transaction_options = transaction_options.into();
 
         Ok(if let Some(options) = &transaction_options {
@@ -421,10 +413,10 @@ impl OutputBuilder {
 
         self
     }
-    fn finish_output(self) -> Result<Output, crate::types::block::Error> {
-        match self {
-            Self::Basic(b) => b.finish_output(),
-            Self::Nft(b) => b.finish_output(),
-        }
+    fn finish_output(self) -> Result<Output, BlockError> {
+        Ok(match self {
+            Self::Basic(b) => b.finish_output()?,
+            Self::Nft(b) => b.finish_output()?,
+        })
     }
 }

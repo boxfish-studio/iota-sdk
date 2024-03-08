@@ -11,16 +11,13 @@
 //! cargo run --release --all-features --example send_nft
 //! ```
 
-use iota_sdk::{
-    wallet::{Result, SendNftParams},
-    Wallet,
-};
+use iota_sdk::{wallet::SendNftParams, Wallet};
 
 // The address to send the tokens to
 const RECV_ADDRESS: &str = "rms1qpszqzadsym6wpppd6z037dvlejmjuke7s24hm95s9fg9vpua7vluaw60xu";
 
 #[tokio::main]
-async fn main() -> Result<()> {
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // This example uses secrets in environment variables for simplicity which should not be done in production.
     dotenvy::dotenv().ok();
 
@@ -51,15 +48,14 @@ async fn main() -> Result<()> {
         let transaction = wallet.send_nft(outputs, None).await?;
         println!("Transaction sent: {}", transaction.transaction_id);
 
-        // Wait for transaction to get accepted
-        let block_id = wallet
+        wallet
             .wait_for_transaction_acceptance(&transaction.transaction_id, None, None)
             .await?;
 
         println!(
-            "Tx accepted in block: {}/block/{}",
+            "Tx accepted: {}/transactions/{}",
             std::env::var("EXPLORER_URL").unwrap(),
-            block_id
+            transaction.transaction_id
         );
     } else {
         println!("No available NFTs");

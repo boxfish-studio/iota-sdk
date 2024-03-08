@@ -6,7 +6,6 @@ use iota_sdk::client::mqtt::{MqttPayload, Topic};
 use iota_sdk::{
     client::{request_funds_from_faucet, Client},
     types::{
-        api::core::OutputWithMetadataResponse,
         block::{
             output::{
                 AccountOutputBuilder, BasicOutputBuilder, FoundryOutputBuilder, MinimumOutputAmount, NftOutputBuilder,
@@ -18,7 +17,7 @@ use iota_sdk::{
     },
 };
 
-use crate::{method::ClientMethod, response::Response, Result};
+use crate::{method::ClientMethod, response::Response};
 
 /// Listen to MQTT events
 #[cfg(feature = "mqtt")]
@@ -53,7 +52,10 @@ where
 }
 
 /// Call a client method.
-pub(crate) async fn call_client_method_internal(client: &Client, method: ClientMethod) -> Result<Response> {
+pub(crate) async fn call_client_method_internal(
+    client: &Client,
+    method: ClientMethod,
+) -> Result<Response, crate::Error> {
     let response = match method {
         ClientMethod::BuildAccountOutput {
             amount,
@@ -174,19 +176,20 @@ pub(crate) async fn call_client_method_internal(client: &Client, method: ClientM
             Response::Ok
         }
         ClientMethod::GetNode => Response::Node(client.get_node().await?),
-        ClientMethod::GetNetworkInfo => Response::NetworkInfo(client.get_network_info().await?),
         ClientMethod::GetNetworkId => Response::NetworkId(client.get_network_id().await?.to_string()),
         ClientMethod::GetBech32Hrp => Response::Bech32Hrp(client.get_bech32_hrp().await?),
         ClientMethod::GetProtocolParameters => Response::ProtocolParameters(client.get_protocol_parameters().await?),
         #[cfg(not(target_family = "wasm"))]
         ClientMethod::UnhealthyNodes => Response::UnhealthyNodes(client.unhealthy_nodes().await.into_iter().collect()),
         ClientMethod::GetHealth { url } => Response::Bool(client.get_health(&url).await?),
-        ClientMethod::GetNodeInfo { url, auth } => Response::NodeInfo(Client::get_node_info(&url, auth).await?),
-        ClientMethod::GetInfo => Response::Info(client.get_info().await?),
+        ClientMethod::GetInfo { url, auth } => Response::Info(Client::get_info(&url, auth).await?),
+        ClientMethod::GetNodeInfo => Response::NodeInfo(client.get_node_info().await?),
+        ClientMethod::GetNetworkMetrics => Response::NetworkMetrics(client.get_network_metrics().await?),
+        ClientMethod::GetRoutes => Response::Routes(client.get_routes().await?),
         ClientMethod::GetAccountCongestion { account_id, work_score } => {
             Response::Congestion(client.get_account_congestion(&account_id, work_score).await?)
         }
-        ClientMethod::GetRewards { output_id, slot_index } => {
+        ClientMethod::GetOutputManaRewards { output_id, slot_index } => {
             Response::ManaRewards(client.get_output_mana_rewards(&output_id, slot_index).await?)
         }
         ClientMethod::GetValidators { page_size, cursor } => {
@@ -212,27 +215,30 @@ pub(crate) async fn call_client_method_internal(client: &Client, method: ClientM
                 .await?,
         ),
         ClientMethod::GetBlock { block_id } => Response::Block(BlockDto::from(&client.get_block(&block_id).await?)),
+        ClientMethod::GetBlockRaw { block_id } => Response::Raw(client.get_block_raw(&block_id).await?),
         ClientMethod::GetBlockMetadata { block_id } => {
             Response::BlockMetadata(client.get_block_metadata(&block_id).await?)
         }
         ClientMethod::GetBlockWithMetadata { block_id } => {
             Response::BlockWithMetadata(client.get_block_with_metadata(&block_id).await?)
         }
-        ClientMethod::GetBlockRaw { block_id } => Response::Raw(client.get_block_raw(&block_id).await?),
-        ClientMethod::GetOutput { output_id } => Response::OutputWithMetadataResponse(
-            client
-                .get_output_with_metadata(&output_id)
-                .await
-                .map(OutputWithMetadataResponse::from)?,
-        ),
+        ClientMethod::GetOutput { output_id } => Response::OutputResponse(client.get_output(&output_id).await?),
+        ClientMethod::GetOutputRaw { output_id } => Response::Raw(client.get_output_raw(&output_id).await?),
         ClientMethod::GetOutputMetadata { output_id } => {
             Response::OutputMetadata(client.get_output_metadata(&output_id).await?)
         }
         ClientMethod::GetOutputWithMetadata { output_id } => {
             Response::OutputWithMetadata(client.get_output_with_metadata(&output_id).await?)
         }
+        ClientMethod::GetOutputs { output_ids } => Response::Outputs(client.get_outputs(&output_ids).await?),
+        ClientMethod::GetOutputsIgnoreNotFound { output_ids } => {
+            Response::Outputs(client.get_outputs_ignore_not_found(&output_ids).await?)
+        }
         ClientMethod::GetIncludedBlock { transaction_id } => {
             Response::Block(BlockDto::from(&client.get_included_block(&transaction_id).await?))
+        }
+        ClientMethod::GetIncludedBlockRaw { transaction_id } => {
+            Response::Raw(client.get_included_block_raw(&transaction_id).await?)
         }
         ClientMethod::GetIncludedBlockMetadata { transaction_id } => {
             Response::BlockMetadata(client.get_included_block_metadata(&transaction_id).await?)
@@ -241,29 +247,25 @@ pub(crate) async fn call_client_method_internal(client: &Client, method: ClientM
             Response::TransactionMetadata(client.get_transaction_metadata(&transaction_id).await?)
         }
         ClientMethod::GetCommitment { commitment_id } => {
-            Response::SlotCommitment(client.get_slot_commitment_by_id(&commitment_id).await?)
+            Response::SlotCommitment(client.get_commitment(&commitment_id).await?)
+        }
+        ClientMethod::GetCommitmentRaw { commitment_id } => {
+            Response::Raw(client.get_commitment_raw(&commitment_id).await?)
         }
         ClientMethod::GetUtxoChanges { commitment_id } => {
-            Response::UtxoChanges(client.get_utxo_changes_by_slot_commitment_id(&commitment_id).await?)
+            Response::UtxoChanges(client.get_utxo_changes(&commitment_id).await?)
         }
-        ClientMethod::GetUtxoChangesFull { commitment_id } => Response::UtxoChangesFull(
-            client
-                .get_utxo_changes_full_by_slot_commitment_id(&commitment_id)
-                .await?,
-        ),
-        // TODO: this should be renamed to `GetCommitmentBySlot`
-        // https://github.com/iotaledger/iota-sdk/issues/1921
-        ClientMethod::GetCommitmentByIndex { slot } => {
-            Response::SlotCommitment(client.get_slot_commitment_by_slot(slot).await?)
+        ClientMethod::GetUtxoChangesFull { commitment_id } => {
+            Response::UtxoChangesFull(client.get_utxo_changes_full(&commitment_id).await?)
         }
-        // TODO: this should be renamed to `GetUtxoChangesBySlot`
-        // https://github.com/iotaledger/iota-sdk/issues/1921
-        ClientMethod::GetUtxoChangesByIndex { slot } => {
+        ClientMethod::GetCommitmentBySlot { slot } => {
+            Response::SlotCommitment(client.get_commitment_by_slot(slot).await?)
+        }
+        ClientMethod::GetCommitmentBySlotRaw { slot } => Response::Raw(client.get_commitment_by_slot_raw(slot).await?),
+        ClientMethod::GetUtxoChangesBySlot { slot } => {
             Response::UtxoChanges(client.get_utxo_changes_by_slot(slot).await?)
         }
-        // TODO: this should be renamed to `GetUtxoChangesFullBySlot`
-        // https://github.com/iotaledger/iota-sdk/issues/1921
-        ClientMethod::GetUtxoChangesFullByIndex { slot } => {
+        ClientMethod::GetUtxoChangesFullBySlot { slot } => {
             Response::UtxoChangesFull(client.get_utxo_changes_full_by_slot(slot).await?)
         }
         ClientMethod::OutputIds { query_parameters } => {
@@ -294,24 +296,6 @@ pub(crate) async fn call_client_method_internal(client: &Client, method: ClientM
             Response::OutputIdsResponse(client.nft_output_ids(query_parameters).await?)
         }
         ClientMethod::NftOutputId { nft_id } => Response::OutputId(client.nft_output_id(nft_id).await?),
-        ClientMethod::GetOutputs { output_ids } => {
-            let outputs_response = client
-                .get_outputs_with_metadata(&output_ids)
-                .await?
-                .iter()
-                .map(OutputWithMetadataResponse::from)
-                .collect();
-            Response::Outputs(outputs_response)
-        }
-        ClientMethod::GetOutputsIgnoreErrors { output_ids } => {
-            let outputs_response = client
-                .get_outputs_with_metadata_ignore_not_found(&output_ids)
-                .await?
-                .iter()
-                .map(OutputWithMetadataResponse::from)
-                .collect();
-            Response::Outputs(outputs_response)
-        }
         ClientMethod::FindBlocks { block_ids } => Response::Blocks(
             client
                 .find_blocks(&block_ids)
@@ -323,17 +307,8 @@ pub(crate) async fn call_client_method_internal(client: &Client, method: ClientM
         ClientMethod::FindInputs { addresses, amount } => {
             Response::Inputs(client.find_inputs(addresses, amount).await?)
         }
-        ClientMethod::HexToBech32 { hex, bech32_hrp } => {
-            Response::Bech32Address(client.hex_to_bech32(&hex, bech32_hrp).await?)
-        }
-        ClientMethod::AccountIdToBech32 { account_id, bech32_hrp } => {
-            Response::Bech32Address(client.account_id_to_bech32(account_id, bech32_hrp).await?)
-        }
-        ClientMethod::NftIdToBech32 { nft_id, bech32_hrp } => {
-            Response::Bech32Address(client.nft_id_to_bech32(nft_id, bech32_hrp).await?)
-        }
-        ClientMethod::HexPublicKeyToBech32Address { hex, bech32_hrp } => {
-            Response::Bech32Address(client.hex_public_key_to_bech32_address(&hex, bech32_hrp).await?)
+        ClientMethod::AddressToBech32 { address, bech32_hrp } => {
+            Response::Bech32Address(client.address_to_bech32(address, bech32_hrp).await?)
         }
         ClientMethod::ComputeMinimumOutputAmount { output } => {
             let storage_score_params = client.get_storage_score_parameters().await?;

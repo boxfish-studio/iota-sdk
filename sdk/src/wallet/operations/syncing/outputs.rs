@@ -4,40 +4,36 @@
 use instant::Instant;
 
 use crate::{
-    client::{secret::SecretManage, Client, Error as ClientError},
+    client::{secret::SecretManage, Client, ClientError},
     types::{
         api::core::OutputWithMetadataResponse,
         block::{
             core::{BasicBlockBody, BlockBody},
             input::Input,
-            output::{OutputId, OutputWithMetadata},
+            output::OutputId,
             payload::{signed_transaction::TransactionId, Payload, SignedTransactionPayload},
         },
     },
-    wallet::{build_transaction_from_payload_and_inputs, task, types::OutputData, Wallet},
+    wallet::{build_transaction_from_payload_and_inputs, task, types::OutputData, Wallet, WalletError},
 };
 
-impl<S: 'static + SecretManage> Wallet<S>
-where
-    crate::wallet::Error: From<S::Error>,
-    crate::client::Error: From<S::Error>,
-{
+impl<S: 'static + SecretManage> Wallet<S> {
     /// Convert OutputWithMetadataResponse to OutputData with the network_id added
     pub(crate) async fn output_response_to_output_data(
         &self,
-        outputs_with_meta: Vec<OutputWithMetadata>,
-    ) -> crate::wallet::Result<Vec<OutputData>> {
+        outputs_with_meta: Vec<OutputWithMetadataResponse>,
+    ) -> Result<Vec<OutputData>, WalletError> {
         log::debug!("[SYNC] convert output_responses");
         // store outputs with network_id
         let network_id = self.client().get_network_id().await?;
-        let wallet_data = self.data().await;
+        let wallet_ledger = self.ledger().await;
 
         Ok(outputs_with_meta
             .into_iter()
             .map(|output_with_meta| {
                 // check if we know the transaction that created this output and if we created it (if we store incoming
                 // transactions separated, then this check wouldn't be required)
-                let remainder = wallet_data
+                let remainder = wallet_ledger
                     .transactions
                     .get(output_with_meta.metadata().output_id().transaction_id())
                     .map_or(false, |tx| !tx.incoming);
@@ -59,16 +55,16 @@ where
     pub(crate) async fn get_outputs(
         &self,
         output_ids: Vec<OutputId>,
-    ) -> crate::wallet::Result<Vec<OutputWithMetadata>> {
+    ) -> Result<Vec<OutputWithMetadataResponse>, WalletError> {
         log::debug!("[SYNC] start get_outputs");
         let get_outputs_start_time = Instant::now();
         let mut outputs = Vec::new();
         let mut unknown_outputs = Vec::new();
         let mut unspent_outputs = Vec::new();
-        let mut wallet_data = self.data_mut().await;
+        let mut wallet_ledger = self.ledger_mut().await;
 
         for output_id in output_ids {
-            match wallet_data.outputs.get_mut(&output_id) {
+            match wallet_ledger.outputs.get_mut(&output_id) {
                 // set unspent if not already
                 Some(output_data) => {
                     if output_data.is_spent() {
@@ -76,7 +72,7 @@ where
                         output_data.metadata.spent = None;
                     }
                     unspent_outputs.push((output_id, output_data.clone()));
-                    outputs.push(OutputWithMetadata::new(
+                    outputs.push(OutputWithMetadataResponse::new(
                         output_data.output.clone(),
                         output_data.output_id_proof.clone(),
                         output_data.metadata,
@@ -88,10 +84,10 @@ where
         // known output is unspent, so insert it to the unspent outputs again, because if it was an
         // account/nft/foundry output it could have been removed when syncing without them
         for (output_id, output_data) in unspent_outputs {
-            wallet_data.unspent_outputs.insert(output_id, output_data);
+            wallet_ledger.unspent_outputs.insert(output_id, output_data);
         }
 
-        drop(wallet_data);
+        drop(wallet_ledger);
 
         if !unknown_outputs.is_empty() {
             outputs.extend(self.client().get_outputs_with_metadata(&unknown_outputs).await?);
@@ -111,16 +107,18 @@ where
     pub(crate) async fn request_incoming_transaction_data(
         &self,
         mut transaction_ids: Vec<TransactionId>,
-    ) -> crate::wallet::Result<()> {
+    ) -> Result<(), WalletError> {
         log::debug!("[SYNC] request_incoming_transaction_data");
 
-        let wallet_data = self.data().await;
+        let wallet_ledger = self.ledger().await;
         transaction_ids.retain(|transaction_id| {
-            !(wallet_data.transactions.contains_key(transaction_id)
-                || wallet_data.incoming_transactions.contains_key(transaction_id)
-                || wallet_data.inaccessible_incoming_transactions.contains(transaction_id))
+            !(wallet_ledger.transactions.contains_key(transaction_id)
+                || wallet_ledger.incoming_transactions.contains_key(transaction_id)
+                || wallet_ledger
+                    .inaccessible_incoming_transactions
+                    .contains(transaction_id))
         });
-        drop(wallet_data);
+        drop(wallet_ledger);
 
         // Limit parallel requests to 100, to avoid timeouts
         let results =
@@ -162,10 +160,10 @@ where
                                         .into())
                                     }
                                 }
-                                Err(crate::client::Error::Node(crate::client::node_api::error::Error::NotFound(_))) => {
+                                Err(ClientError::Node(crate::client::node_api::error::Error::NotFound(_))) => {
                                     Ok((transaction_id, None))
                                 }
-                                Err(e) => Err(crate::wallet::Error::Client(e.into())),
+                                Err(e) => Err(WalletError::Client(e)),
                             }
                         }))
                         .await
@@ -176,15 +174,15 @@ where
             .await?;
 
         // Update account with new transactions
-        let mut wallet_data = self.data_mut().await;
+        let mut wallet_ledger = self.ledger_mut().await;
         for (transaction_id, txn) in results.into_iter().flatten() {
             if let Some(transaction) = txn {
-                wallet_data.incoming_transactions.insert(transaction_id, transaction);
+                wallet_ledger.incoming_transactions.insert(transaction_id, transaction);
             } else {
                 log::debug!("[SYNC] adding {transaction_id} to inaccessible_incoming_transactions");
                 // Save transactions that weren't found by the node to avoid requesting them endlessly.
                 // Will be cleared when new client options are provided.
-                wallet_data.inaccessible_incoming_transactions.insert(transaction_id);
+                wallet_ledger.inaccessible_incoming_transactions.insert(transaction_id);
             }
         }
 
@@ -196,7 +194,7 @@ where
 pub(crate) async fn get_inputs_for_transaction_payload(
     client: &Client,
     transaction_payload: &SignedTransactionPayload,
-) -> crate::wallet::Result<Vec<OutputWithMetadata>> {
+) -> Result<Vec<OutputWithMetadataResponse>, WalletError> {
     let output_ids = transaction_payload
         .transaction()
         .inputs()

@@ -2,7 +2,6 @@ import type {
     __AnnounceCandidacyMethod__,
     __PrepareBurnMethod__,
     __PrepareClaimOutputsMethod__,
-    __ClaimOutputsMethod__,
     __PrepareConsolidateOutputsMethod__,
     __PrepareCreateAccountOutputMethod__,
     __DeregisterParticipationEventMethod__,
@@ -25,17 +24,16 @@ import type {
     __PrepareMintNativeTokenMethod__,
     __PrepareMintNftsMethod__,
     __PrepareOutputMethod__,
+    __PrepareSendManaMethod__,
     __PrepareSendMethod__,
     __PrepareCreateDelegationMethod__,
     __PrepareDelayDelegationClaimingMethod__,
     __PrepareBeginStakingMethod__,
     __PrepareExtendStakingMethod__,
     __PrepareEndStakingMethod__,
-    __PrepareTransactionMethod__,
+    __PrepareSendOutputsMethod__,
     __RegisterParticipationEventsMethod__,
     __WaitForTransactionAcceptanceMethod__,
-    __SendMethod__,
-    __SendWithParamsMethod__,
     __PrepareSendNativeTokensMethod__,
     __PrepareSendNftMethod__,
     __SendOutputsMethod__,
@@ -55,7 +53,7 @@ import type {
     __PrepareIncreaseVotingPowerMethod__,
     __PrepareDecreaseVotingPowerMethod__,
     __PrepareStopParticipatingMethod__,
-    __BackupMethod__,
+    __BackupToStrongholdSnapshotMethod__,
     __ChangeStrongholdPasswordMethod__,
     __ClearStrongholdPasswordMethod__,
     __ClearListenersMethod__,
@@ -63,7 +61,7 @@ import type {
     __GenerateMnemonicMethod__,
     __GetLedgerNanoStatusMethod__,
     __IsStrongholdPasswordAvailableMethod__,
-    __RestoreBackupMethod__,
+    __RestoreFromStrongholdSnapshotMethod__,
     __SetClientOptionsMethod__,
     __SetStrongholdPasswordClearIntervalMethod__,
     __SetStrongholdPasswordMethod__,
@@ -77,7 +75,6 @@ import type {
 export type __WalletMethod__ =
     | __AnnounceCandidacyMethod__
     | __PrepareBurnMethod__
-    | __ClaimOutputsMethod__
     | __PrepareClaimOutputsMethod__
     | __PrepareConsolidateOutputsMethod__
     | __PrepareCreateAccountOutputMethod__
@@ -106,17 +103,16 @@ export type __WalletMethod__ =
     | __PrepareMintNativeTokenMethod__
     | __PrepareMintNftsMethod__
     | __PrepareOutputMethod__
+    | __PrepareSendManaMethod__
     | __PrepareSendMethod__
     | __PrepareCreateDelegationMethod__
     | __PrepareDelayDelegationClaimingMethod__
     | __PrepareBeginStakingMethod__
     | __PrepareExtendStakingMethod__
     | __PrepareEndStakingMethod__
-    | __PrepareTransactionMethod__
+    | __PrepareSendOutputsMethod__
     | __RegisterParticipationEventsMethod__
     | __WaitForTransactionAcceptanceMethod__
-    | __SendMethod__
-    | __SendWithParamsMethod__
     | __PrepareSendNativeTokensMethod__
     | __PrepareSendNftMethod__
     | __SendOutputsMethod__
@@ -131,7 +127,7 @@ export type __WalletMethod__ =
     | __GetParticipationOverviewMethod__
     | __PrepareIncreaseVotingPowerMethod__
     | __PrepareDecreaseVotingPowerMethod__
-    | __BackupMethod__
+    | __BackupToStrongholdSnapshotMethod__
     | __ChangeStrongholdPasswordMethod__
     | __ClearListenersMethod__
     | __ClearStrongholdPasswordMethod__
@@ -139,7 +135,7 @@ export type __WalletMethod__ =
     | __GenerateMnemonicMethod__
     | __GetLedgerNanoStatusMethod__
     | __IsStrongholdPasswordAvailableMethod__
-    | __RestoreBackupMethod__
+    | __RestoreFromStrongholdSnapshotMethod__
     | __SetClientOptionsMethod__
     | __SetStrongholdPasswordClearIntervalMethod__
     | __SetStrongholdPasswordMethod__

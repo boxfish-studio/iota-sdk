@@ -4,22 +4,21 @@
 use primitive_types::U256;
 
 use crate::{
-    client::{api::PreparedTransactionData, secret::SecretManage},
+    client::{api::PreparedTransactionData, secret::SecretManage, ClientError},
     types::block::output::{
-        AccountId, AccountOutputBuilder, FoundryId, FoundryOutputBuilder, Output, SimpleTokenScheme, TokenId,
-        TokenScheme,
+        AccountId, FoundryId, FoundryOutputBuilder, Output, SimpleTokenScheme, TokenId, TokenScheme,
     },
     wallet::{
         operations::transaction::TransactionOptions,
         types::{OutputData, TransactionWithMetadata},
-        Error, Wallet,
+        Wallet, WalletError,
     },
 };
 
 impl<S: 'static + SecretManage> Wallet<S>
 where
-    crate::wallet::Error: From<S::Error>,
-    crate::client::Error: From<S::Error>,
+    WalletError: From<S::Error>,
+    ClientError: From<S::Error>,
 {
     /// Melts native tokens.
     ///
@@ -31,7 +30,7 @@ where
         token_id: TokenId,
         melt_amount: impl Into<U256> + Send,
         options: impl Into<Option<TransactionOptions>> + Send,
-    ) -> crate::wallet::Result<TransactionWithMetadata> {
+    ) -> Result<TransactionWithMetadata, WalletError> {
         let options = options.into();
         let prepared_transaction = self
             .prepare_melt_native_token(token_id, melt_amount, options.clone())
@@ -46,7 +45,7 @@ where
         token_id: TokenId,
         melt_amount: impl Into<U256> + Send,
         options: impl Into<Option<TransactionOptions>> + Send,
-    ) -> crate::wallet::Result<PreparedTransactionData> {
+    ) -> Result<PreparedTransactionData, WalletError> {
         log::debug!("[TRANSACTION] prepare_melt_native_token");
 
         let foundry_id = FoundryId::from(token_id);
@@ -59,29 +58,27 @@ where
                 Output::Foundry(foundry_output) => (account_data, foundry_output),
                 _ => unreachable!("We already checked it's a foundry output"),
             })?;
-
-        if let Output::Account(account_output) = &existing_account_output_data.output {
-            // Create the new account output with updated amount.
-            let account_output = AccountOutputBuilder::from(account_output)
-                .with_account_id(account_id)
-                .finish_output()?;
-
-            let TokenScheme::Simple(token_scheme) = existing_foundry_output.token_scheme();
-            let outputs = [
-                account_output,
-                FoundryOutputBuilder::from(&existing_foundry_output)
-                    .with_token_scheme(TokenScheme::Simple(SimpleTokenScheme::new(
-                        token_scheme.minted_tokens(),
-                        token_scheme.melted_tokens() + melt_amount,
-                        token_scheme.maximum_supply(),
-                    )?))
-                    .finish_output()?,
-            ];
-            // Input selection will detect that we're melting native tokens and add the required inputs if available
-            self.prepare_transaction(outputs, options).await
+        let account_output_id = existing_account_output_data.output_id;
+        let mut options = options.into();
+        if let Some(options) = options.as_mut() {
+            options.required_inputs.insert(account_output_id);
         } else {
-            unreachable!("We checked if it's an account output before")
+            options.replace(TransactionOptions {
+                required_inputs: [account_output_id].into(),
+                ..Default::default()
+            });
         }
+
+        let TokenScheme::Simple(token_scheme) = existing_foundry_output.token_scheme();
+        let outputs = [FoundryOutputBuilder::from(&existing_foundry_output)
+            .with_token_scheme(TokenScheme::Simple(SimpleTokenScheme::new(
+                token_scheme.minted_tokens(),
+                token_scheme.melted_tokens() + melt_amount,
+                token_scheme.maximum_supply(),
+            )?))
+            .finish_output()?];
+        // Transaction builder will detect that we're melting native tokens and add the required inputs if available
+        self.prepare_send_outputs(outputs, options).await
     }
 
     /// Find and return unspent `OutputData` for given `account_id` and `foundry_id`
@@ -89,11 +86,11 @@ where
         &self,
         account_id: AccountId,
         foundry_id: FoundryId,
-    ) -> crate::wallet::Result<(OutputData, OutputData)> {
+    ) -> Result<(OutputData, OutputData), WalletError> {
         let mut existing_account_output_data = None;
         let mut existing_foundry_output = None;
 
-        for (output_id, output_data) in self.data().await.unspent_outputs.iter() {
+        for (output_id, output_data) in self.ledger().await.unspent_outputs.iter() {
             match &output_data.output {
                 Output::Account(output) => {
                     if output.account_id_non_null(output_id) == account_id {
@@ -115,11 +112,11 @@ where
         }
 
         let existing_account_output_data = existing_account_output_data.ok_or_else(|| {
-            Error::BurningOrMeltingFailed("required account output for foundry not found".to_string())
+            WalletError::BurningOrMeltingFailed("required account output for foundry not found".to_string())
         })?;
 
         let existing_foundry_output_data = existing_foundry_output
-            .ok_or_else(|| Error::BurningOrMeltingFailed("required foundry output not found".to_string()))?;
+            .ok_or_else(|| WalletError::BurningOrMeltingFailed("required foundry output not found".to_string()))?;
 
         Ok((existing_account_output_data, existing_foundry_output_data))
     }

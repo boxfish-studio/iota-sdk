@@ -4,12 +4,17 @@
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    client::{api::PreparedTransactionData, secret::SecretManage},
+    client::{
+        api::{options::TransactionOptions, PreparedTransactionData},
+        secret::SecretManage,
+        ClientError,
+    },
     types::block::{
         output::{feature::StakingFeature, AccountId, AccountOutputBuilder},
         slot::EpochIndex,
     },
-    wallet::{types::TransactionWithMetadata, TransactionOptions, Wallet},
+    utils::serde::string,
+    wallet::{types::TransactionWithMetadata, Wallet, WalletError},
 };
 
 /// Parameters for beginning a staking period.
@@ -19,8 +24,10 @@ pub struct BeginStakingParams {
     /// The account id which will begin staking.
     pub account_id: AccountId,
     /// The amount of tokens to stake.
+    #[serde(with = "string")]
     pub staked_amount: u64,
     /// The fixed cost of the validator, which it receives as part of its Mana rewards.
+    #[serde(with = "string")]
     pub fixed_cost: u64,
     /// The staking period (in epochs). Will default to the staking unbonding period.
     pub staking_period: Option<u32>,
@@ -28,14 +35,14 @@ pub struct BeginStakingParams {
 
 impl<S: 'static + SecretManage> Wallet<S>
 where
-    crate::wallet::Error: From<S::Error>,
-    crate::client::Error: From<S::Error>,
+    WalletError: From<S::Error>,
+    ClientError: From<S::Error>,
 {
     pub async fn begin_staking(
         &self,
         params: BeginStakingParams,
         options: impl Into<Option<TransactionOptions>> + Send,
-    ) -> crate::wallet::Result<TransactionWithMetadata> {
+    ) -> Result<TransactionWithMetadata, WalletError> {
         let options = options.into();
         let prepared = self.prepare_begin_staking(params, options.clone()).await?;
 
@@ -47,23 +54,23 @@ where
         &self,
         params: BeginStakingParams,
         options: impl Into<Option<TransactionOptions>> + Send,
-    ) -> crate::wallet::Result<PreparedTransactionData> {
+    ) -> Result<PreparedTransactionData, WalletError> {
         log::debug!("[TRANSACTION] prepare_begin_staking");
 
         let account_id = params.account_id;
         let account_output_data = self
-            .data()
+            .ledger()
             .await
             .unspent_account_output(&account_id)
             .cloned()
-            .ok_or_else(|| crate::wallet::Error::AccountNotFound)?;
+            .ok_or_else(|| WalletError::AccountNotFound)?;
 
         if account_output_data
             .output
             .features()
             .map_or(false, |f| f.staking().is_some())
         {
-            return Err(crate::wallet::Error::StakingFailed(format!(
+            return Err(WalletError::StakingFailed(format!(
                 "account id {account_id} already has a staking feature"
             )));
         }
@@ -72,7 +79,7 @@ where
 
         if let Some(staking_period) = params.staking_period {
             if staking_period < protocol_parameters.staking_unbonding_period() {
-                return Err(crate::wallet::Error::StakingFailed(format!(
+                return Err(WalletError::StakingFailed(format!(
                     "staking period {staking_period} is less than the minimum {}",
                     protocol_parameters.staking_unbonding_period()
                 )));
@@ -95,7 +102,7 @@ where
             ))
             .finish_output()?;
 
-        let transaction = self.prepare_transaction([output], options).await?;
+        let transaction = self.prepare_send_outputs([output], options).await?;
 
         Ok(transaction)
     }

@@ -2,8 +2,7 @@ import json
 import os
 
 from dotenv import load_dotenv
-
-from iota_sdk import (AddressUnlockCondition, Client, Ed25519Address,
+from iota_sdk import (AddressUnlockCondition, Client,
                       ExpirationUnlockCondition, MetadataFeature,
                       SenderFeature, StorageDepositReturnUnlockCondition,
                       TagFeature, TimelockUnlockCondition, Utils, utf8_to_hex)
@@ -15,12 +14,10 @@ node_url = os.environ.get('NODE_URL', 'https://api.testnet.shimmer.network')
 # Create a Client instance
 client = Client(nodes=[node_url])
 
-hex_address = Utils.bech32_to_hex(
+address = Utils.parse_bech32_address(
     'rms1qpllaj0pyveqfkwxmnngz2c488hfdtmfrj3wfkgxtk4gtyrax0jaxzt70zy')
 
-address_unlock_condition = AddressUnlockCondition(
-    Ed25519Address(hex_address)
-)
+address_unlock_condition = AddressUnlockCondition(address)
 
 # Build most basic output with amount and a single address unlock condition
 basic_output = client.build_basic_output(
@@ -37,7 +34,7 @@ basic_output = client.build_basic_output(
         address_unlock_condition,
     ],
     features=[
-        MetadataFeature(utf8_to_hex('Hello, World!'))
+        MetadataFeature({'data': utf8_to_hex('Hello, World!')})
     ],
     amount=1000000,
 )
@@ -48,7 +45,7 @@ basic_output = client.build_basic_output(
     unlock_conditions=[
         address_unlock_condition,
         StorageDepositReturnUnlockCondition(
-            return_address=Ed25519Address(hex_address),
+            return_address=address,
             amount=1000000
         )
     ],
@@ -61,7 +58,7 @@ basic_output = client.build_basic_output(
     unlock_conditions=[
         address_unlock_condition,
         ExpirationUnlockCondition(
-            return_address=Ed25519Address(hex_address),
+            return_address=address,
             slot_index=1
         )
     ],
@@ -97,7 +94,7 @@ basic_output = client.build_basic_output(
         address_unlock_condition
     ],
     features=[
-        SenderFeature(Ed25519Address(hex_address))
+        SenderFeature(address)
     ],
     amount=1000000,
 )

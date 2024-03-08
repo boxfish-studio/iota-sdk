@@ -3,7 +3,7 @@
 
 import { SecretManagerMethodHandler } from './secret-manager-method-handler';
 import type {
-    IGenerateAddressesOptions,
+    GenerateAddressesOptions,
     PreparedTransactionData,
     LedgerNanoStatus,
 } from '../types/client';
@@ -21,6 +21,7 @@ import {
     UnsignedBlock,
     Block,
     parseBlock,
+    Bech32Address,
 } from '../types';
 
 import { plainToInstance } from 'class-transformer';
@@ -44,14 +45,14 @@ export class SecretManager {
     }
 
     /**
-     * Generate Ed25519 addresses.
+     * Generate multiple Ed25519 addresses at once.
      *
      * @param generateAddressesOptions Options to generate addresses.
      * @returns An array of generated addresses.
      */
     async generateEd25519Addresses(
-        generateAddressesOptions: IGenerateAddressesOptions,
-    ): Promise<string[]> {
+        generateAddressesOptions: GenerateAddressesOptions,
+    ): Promise<Bech32Address[]> {
         const response = await this.methodHandler.callMethod({
             name: 'generateEd25519Addresses',
             data: {
@@ -69,7 +70,7 @@ export class SecretManager {
      * @returns An array of generated addresses.
      */
     async generateEvmAddresses(
-        generateAddressesOptions: IGenerateAddressesOptions,
+        generateAddressesOptions: GenerateAddressesOptions,
     ): Promise<HexEncodedString[]> {
         const response = await this.methodHandler.callMethod({
             name: 'generateEvmAddresses',

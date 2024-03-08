@@ -11,7 +11,7 @@ from iota_sdk.types.slot import SlotCommitmentId
 
 @json
 @dataclass
-class NodeInfoStatus:
+class StatusResponse:
     """Node status.
 
     Attributes:
@@ -44,27 +44,6 @@ class NodeInfoStatus:
     latest_accepted_block_slot: SlotIndex
     latest_confirmed_block_slot: SlotIndex
     pruning_epoch: EpochIndex
-
-
-@json
-@dataclass
-class NodeInfoMetrics:
-    """Node metrics.
-
-    Attributes:
-        blocks_per_second: The current rate of new blocks per second.
-        confirmed_blocks_per_second: The current rate of confirmed blocks per second.
-        confirmation_rate: The ratio of confirmed blocks to new blocks of the last confirmed slot.
-    """
-    blocks_per_second: float = field(metadata=config(
-        encoder=str
-    ))
-    confirmed_blocks_per_second: float = field(metadata=config(
-        encoder=str
-    ))
-    confirmation_rate: float = field(metadata=config(
-        encoder=str
-    ))
 
 
 @json
@@ -279,6 +258,7 @@ class ProtocolParameters:
     bech32_hrp: str
     storage_score_parameters: StorageScoreParameters
     work_score_parameters: WorkScoreParameters
+    mana_parameters: ManaParameters
     token_supply: int = field(metadata=config(
         encoder=str
     ))
@@ -288,7 +268,6 @@ class ProtocolParameters:
     ))
     slot_duration_in_seconds: int
     slots_per_epoch_exponent: int
-    mana_parameters: ManaParameters
     staking_unbonding_period: int
     validation_blocks_per_slot: int
     punishment_epochs: int
@@ -306,7 +285,7 @@ class ProtocolParameters:
 
 @json
 @dataclass
-class NodeInfoBaseToken:
+class BaseTokenResponse:
     """The base coin info.
 
     Attributes:

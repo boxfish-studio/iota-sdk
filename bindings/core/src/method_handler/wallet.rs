@@ -6,22 +6,22 @@ use std::time::Duration;
 use crypto::signatures::ed25519::PublicKey;
 use iota_sdk::{
     client::api::{PreparedTransactionData, SignedTransactionData, SignedTransactionDataDto},
-    types::{
-        block::{address::ToBech32Ext, output::feature::BlockIssuerKeySource},
-        TryFromDto,
-    },
+    types::{block::output::feature::BlockIssuerKeySource, TryFromDto},
     wallet::{types::TransactionWithMetadataDto, Wallet},
 };
 
 use crate::{method::WalletMethod, response::Response};
 
 /// Call a wallet method.
-pub(crate) async fn call_wallet_method_internal(wallet: &Wallet, method: WalletMethod) -> crate::Result<Response> {
+pub(crate) async fn call_wallet_method_internal(
+    wallet: &Wallet,
+    method: WalletMethod,
+) -> Result<Response, crate::Error> {
     let response = match method {
-        WalletMethod::Accounts => Response::OutputsData(wallet.data().await.accounts().cloned().collect()),
+        WalletMethod::Accounts => Response::OutputsData(wallet.ledger().await.accounts().cloned().collect()),
         #[cfg(feature = "stronghold")]
-        WalletMethod::Backup { destination, password } => {
-            wallet.backup(destination, password).await?;
+        WalletMethod::BackupToStrongholdSnapshot { destination, password } => {
+            wallet.backup_to_stronghold_snapshot(destination, password).await?;
             Response::Ok
         }
         #[cfg(feature = "stronghold")]
@@ -45,14 +45,14 @@ pub(crate) async fn call_wallet_method_internal(wallet: &Wallet, method: WalletM
             Response::Bool(is_available)
         }
         #[cfg(feature = "stronghold")]
-        WalletMethod::RestoreBackup {
+        WalletMethod::RestoreFromStrongholdSnapshot {
             source,
             password,
             ignore_if_coin_type_mismatch,
             ignore_if_bech32_mismatch,
         } => {
             wallet
-                .restore_backup(
+                .restore_from_stronghold_snapshot(
                     source,
                     password,
                     ignore_if_coin_type_mismatch,
@@ -69,23 +69,6 @@ pub(crate) async fn call_wallet_method_internal(wallet: &Wallet, method: WalletM
         WalletMethod::GetLedgerNanoStatus => {
             let ledger_nano_status = wallet.get_ledger_nano_status().await?;
             Response::LedgerNanoStatus(ledger_nano_status)
-        }
-        WalletMethod::GenerateEd25519Address {
-            account_index,
-            address_index,
-            options,
-            bech32_hrp,
-        } => {
-            let address = wallet
-                .generate_ed25519_address(account_index, address_index, options)
-                .await?;
-
-            let bech32_hrp = match bech32_hrp {
-                Some(bech32_hrp) => bech32_hrp,
-                None => *wallet.address().await.hrp(),
-            };
-
-            Response::Bech32Address(address.to_bech32(bech32_hrp))
         }
         #[cfg(feature = "stronghold")]
         WalletMethod::SetStrongholdPassword { password } => {
@@ -135,26 +118,19 @@ pub(crate) async fn call_wallet_method_internal(wallet: &Wallet, method: WalletM
             let output_ids = wallet.claimable_outputs(outputs_to_claim).await?;
             Response::OutputIds(output_ids)
         }
-        WalletMethod::ClaimOutputs { output_ids_to_claim } => {
-            let transaction = wallet.claim_outputs(output_ids_to_claim.to_vec()).await?;
-            Response::SentTransaction(TransactionWithMetadataDto::from(&transaction))
-        }
         // #[cfg(feature = "participation")]
         // WalletMethod::DeregisterParticipationEvent { event_id } => {
         //     wallet.deregister_participation_event(&event_id).await?;
         //     Response::Ok
         // }
-        WalletMethod::GetAddress => {
-            let address = wallet.address().await;
-            Response::Address(address)
-        }
+        WalletMethod::GetAddress => Response::Address(wallet.address().await),
         WalletMethod::GetBalance => Response::Balance(wallet.balance().await?),
         WalletMethod::GetFoundryOutput { token_id } => {
             let output = wallet.get_foundry_output(token_id).await?;
             Response::Output(output)
         }
         WalletMethod::GetIncomingTransaction { transaction_id } => wallet
-            .data()
+            .ledger()
             .await
             .get_incoming_transaction(&transaction_id)
             .map_or_else(
@@ -162,7 +138,7 @@ pub(crate) async fn call_wallet_method_internal(wallet: &Wallet, method: WalletM
                 |transaction| Response::Transaction(Some(Box::new(TransactionWithMetadataDto::from(transaction)))),
             ),
         WalletMethod::GetOutput { output_id } => {
-            Response::OutputData(wallet.data().await.get_output(&output_id).cloned().map(Box::new))
+            Response::OutputData(wallet.ledger().await.get_output(&output_id).cloned().map(Box::new))
         }
         // #[cfg(feature = "participation")]
         // WalletMethod::GetParticipationEvent { event_id } => {
@@ -191,7 +167,7 @@ pub(crate) async fn call_wallet_method_internal(wallet: &Wallet, method: WalletM
         // }
         WalletMethod::GetTransaction { transaction_id } => Response::Transaction(
             wallet
-                .data()
+                .ledger()
                 .await
                 .get_transaction(&transaction_id)
                 .map(TransactionWithMetadataDto::from)
@@ -213,7 +189,7 @@ pub(crate) async fn call_wallet_method_internal(wallet: &Wallet, method: WalletM
         } => {
             let data = if let Some(public_key_str) = public_key {
                 let public_key = PublicKey::try_from_bytes(prefix_hex::decode(public_key_str)?)
-                    .map_err(iota_sdk::wallet::Error::from)?;
+                    .map_err(iota_sdk::wallet::WalletError::from)?;
                 wallet
                     .prepare_implicit_account_transition(&output_id, public_key)
                     .await?
@@ -227,11 +203,11 @@ pub(crate) async fn call_wallet_method_internal(wallet: &Wallet, method: WalletM
             Response::PreparedTransaction(data)
         }
         WalletMethod::ImplicitAccounts => {
-            Response::OutputsData(wallet.data().await.implicit_accounts().cloned().collect())
+            Response::OutputsData(wallet.ledger().await.implicit_accounts().cloned().collect())
         }
         WalletMethod::IncomingTransactions => Response::Transactions(
             wallet
-                .data()
+                .ledger()
                 .await
                 .incoming_transactions()
                 .values()
@@ -239,16 +215,16 @@ pub(crate) async fn call_wallet_method_internal(wallet: &Wallet, method: WalletM
                 .collect(),
         ),
         WalletMethod::Outputs { filter_options } => {
-            let wallet_data = wallet.data().await;
+            let wallet_ledger = wallet.ledger().await;
             Response::OutputsData(if let Some(filter) = filter_options {
-                wallet_data.filtered_outputs(filter).cloned().collect()
+                wallet_ledger.filtered_outputs(filter).cloned().collect()
             } else {
-                wallet_data.outputs().values().cloned().collect()
+                wallet_ledger.outputs().values().cloned().collect()
             })
         }
         WalletMethod::PendingTransactions => Response::Transactions(
             wallet
-                .data()
+                .ledger()
                 .await
                 .pending_transactions()
                 .map(TransactionWithMetadataDto::from)
@@ -315,6 +291,10 @@ pub(crate) async fn call_wallet_method_internal(wallet: &Wallet, method: WalletM
             let data = wallet.prepare_send(params, options).await?;
             Response::PreparedTransaction(data)
         }
+        WalletMethod::PrepareSendMana { params, options } => {
+            let data = wallet.prepare_send_mana(params, options).await?;
+            Response::PreparedTransaction(data)
+        }
         WalletMethod::PrepareSendNativeTokens { params, options } => {
             let data = wallet.prepare_send_native_tokens(params.clone(), options).await?;
             Response::PreparedTransaction(data)
@@ -343,12 +323,15 @@ pub(crate) async fn call_wallet_method_internal(wallet: &Wallet, method: WalletM
         WalletMethod::PrepareExtendStaking {
             account_id,
             additional_epochs,
+            options,
         } => {
-            let data = wallet.prepare_extend_staking(account_id, additional_epochs).await?;
+            let data = wallet
+                .prepare_extend_staking(account_id, additional_epochs, options)
+                .await?;
             Response::PreparedTransaction(data)
         }
-        WalletMethod::PrepareEndStaking { account_id } => {
-            let data = wallet.prepare_end_staking(account_id).await?;
+        WalletMethod::PrepareEndStaking { account_id, options } => {
+            let data = wallet.prepare_end_staking(account_id, options).await?;
             Response::PreparedTransaction(data)
         }
         WalletMethod::AnnounceCandidacy { account_id } => {
@@ -359,8 +342,8 @@ pub(crate) async fn call_wallet_method_internal(wallet: &Wallet, method: WalletM
         //     let data = wallet.prepare_stop_participating(event_id).await?;
         //     Response::PreparedTransaction(data)
         // }
-        WalletMethod::PrepareTransaction { outputs, options } => {
-            let data = wallet.prepare_transaction(outputs, options).await?;
+        WalletMethod::PrepareSendOutputs { outputs, options } => {
+            let data = wallet.prepare_send_outputs(outputs, options).await?;
             Response::PreparedTransaction(data)
         }
         // #[cfg(feature = "participation")]
@@ -378,26 +361,10 @@ pub(crate) async fn call_wallet_method_internal(wallet: &Wallet, method: WalletM
             interval,
             max_attempts,
         } => {
-            let block_id = wallet
+            wallet
                 .wait_for_transaction_acceptance(&transaction_id, interval, max_attempts)
                 .await?;
-            Response::BlockId(block_id)
-        }
-        WalletMethod::Send {
-            amount,
-            address,
-            options,
-        } => {
-            let transaction = wallet.send(amount, address, options).await?;
-            Response::SentTransaction(TransactionWithMetadataDto::from(&transaction))
-        }
-        WalletMethod::SendWithParams { params, options } => {
-            let transaction = wallet.send_with_params(params, options).await?;
-            Response::SentTransaction(TransactionWithMetadataDto::from(&transaction))
-        }
-        WalletMethod::SendOutputs { outputs, options } => {
-            let transaction = wallet.send_outputs(outputs, options).await?;
-            Response::SentTransaction(TransactionWithMetadataDto::from(&transaction))
+            Response::Ok
         }
         WalletMethod::SetAlias { alias } => {
             wallet.set_alias(&alias).await?;
@@ -444,7 +411,7 @@ pub(crate) async fn call_wallet_method_internal(wallet: &Wallet, method: WalletM
         WalletMethod::Sync { options } => Response::Balance(wallet.sync(options).await?),
         WalletMethod::Transactions => Response::Transactions(
             wallet
-                .data()
+                .ledger()
                 .await
                 .transactions()
                 .values()
@@ -452,11 +419,11 @@ pub(crate) async fn call_wallet_method_internal(wallet: &Wallet, method: WalletM
                 .collect(),
         ),
         WalletMethod::UnspentOutputs { filter_options } => {
-            let wallet_data = wallet.data().await;
+            let wallet_ledger = wallet.ledger().await;
             Response::OutputsData(if let Some(filter) = filter_options {
-                wallet_data.filtered_unspent_outputs(filter).cloned().collect()
+                wallet_ledger.filtered_unspent_outputs(filter).cloned().collect()
             } else {
-                wallet_data.unspent_outputs().values().cloned().collect()
+                wallet_ledger.unspent_outputs().values().cloned().collect()
             })
         }
     };

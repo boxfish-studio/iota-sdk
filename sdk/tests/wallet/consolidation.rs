@@ -1,14 +1,14 @@
 // Copyright 2023 IOTA Stiftung
 // SPDX-License-Identifier: Apache-2.0
 
-use iota_sdk::wallet::{ConsolidationParams, Result, SendParams};
+use iota_sdk::wallet::{ConsolidationParams, SendParams};
 use pretty_assertions::assert_eq;
 
 use crate::wallet::common::{make_wallet, request_funds, setup, tear_down};
 
 #[ignore]
 #[tokio::test]
-async fn consolidation() -> Result<()> {
+async fn consolidation() -> Result<(), Box<dyn std::error::Error>> {
     let storage_path_0 = "test-storage/consolidation_0";
     let storage_path_1 = "test-storage/consolidation_1";
     setup(storage_path_0)?;
@@ -31,7 +31,7 @@ async fn consolidation() -> Result<()> {
 
     let balance = wallet_1.sync(None).await.unwrap();
     assert_eq!(balance.base_coin().available(), 10 * amount);
-    assert_eq!(wallet_1.data().await.unspent_outputs().len(), 10);
+    assert_eq!(wallet_1.ledger().await.unspent_outputs().len(), 10);
 
     let tx = wallet_1
         .consolidate_outputs(ConsolidationParams::new().with_force(true))
@@ -44,7 +44,7 @@ async fn consolidation() -> Result<()> {
     // Balance still the same
     assert_eq!(balance.base_coin().available(), 10 * amount);
     // Only one unspent output
-    assert_eq!(wallet_1.data().await.unspent_outputs().len(), 1);
+    assert_eq!(wallet_1.ledger().await.unspent_outputs().len(), 1);
 
     tear_down(storage_path_0)?;
     tear_down(storage_path_1)?;

@@ -11,14 +11,14 @@
 
 use iota_sdk::{
     client::{
-        api::GetAddressesOptions, node_api::indexer::query_parameters::BasicOutputQueryParameters,
-        secret::SecretManager, Client, Result,
+        api::GetAddressesOptions, constants::SHIMMER_COIN_TYPE,
+        node_api::indexer::query_parameters::BasicOutputQueryParameters, secret::SecretManager, Client,
     },
     types::block::output::NativeTokensBuilder,
 };
 
 #[tokio::main]
-async fn main() -> Result<()> {
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // This example uses secrets in environment variables for simplicity which should not be done in production.
     dotenvy::dotenv().ok();
 
@@ -36,14 +36,8 @@ async fn main() -> Result<()> {
 
     // Generate the first address
     let first_address = secret_manager
-        .generate_ed25519_addresses(
-            GetAddressesOptions::from_client(&client)
-                .await?
-                .with_account_index(0)
-                .with_range(0..1),
-        )
-        .await?[0]
-        .clone();
+        .generate_ed25519_address(SHIMMER_COIN_TYPE, 0, 0, client.get_bech32_hrp().await?, None)
+        .await?;
 
     // Get output ids of outputs that can be controlled by this address without further unlock constraints
     let output_ids_response = client

@@ -18,7 +18,6 @@
 
 use iota_sdk::{
     types::block::output::{NativeToken, TokenId},
-    wallet::Result,
     Wallet, U256,
 };
 
@@ -28,7 +27,7 @@ const MIN_AVAILABLE_AMOUNT: u64 = 11;
 const BURN_AMOUNT: u64 = 1;
 
 #[tokio::main]
-async fn main() -> Result<()> {
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // This example uses secrets in environment variables for simplicity which should not be done in production.
     dotenvy::dotenv().ok();
 
@@ -66,13 +65,14 @@ async fn main() -> Result<()> {
         let transaction = wallet.burn(NativeToken::new(token_id, BURN_AMOUNT)?, None).await?;
         println!("Transaction sent: {}", transaction.transaction_id);
 
-        let block_id = wallet
+        wallet
             .wait_for_transaction_acceptance(&transaction.transaction_id, None, None)
             .await?;
+
         println!(
-            "Tx accepted in block: {}/block/{}",
+            "Tx accepted: {}/transactions/{}",
             std::env::var("EXPLORER_URL").unwrap(),
-            block_id
+            transaction.transaction_id
         );
 
         let balance = wallet.sync(None).await?;

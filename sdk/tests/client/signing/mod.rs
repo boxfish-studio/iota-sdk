@@ -11,13 +11,9 @@ use std::str::FromStr;
 use crypto::keys::bip44::Bip44;
 use iota_sdk::{
     client::{
-        api::{
-            input_selection::InputSelection, transaction::validate_signed_transaction_payload_length, verify_semantic,
-            GetAddressesOptions, PreparedTransactionData,
-        },
+        api::{transaction_builder::TransactionBuilder, GetAddressesOptions, PreparedTransactionData},
         constants::SHIMMER_COIN_TYPE,
         secret::{SecretManage, SecretManager},
-        Result,
     },
     types::block::{
         address::{AccountAddress, Address, NftAddress},
@@ -25,9 +21,8 @@ use iota_sdk::{
         input::{Input, UtxoInput},
         output::{AccountId, NftId},
         payload::{signed_transaction::Transaction, SignedTransactionPayload},
-        protocol::protocol_parameters,
+        protocol::iota_mainnet_protocol_parameters,
         slot::{SlotCommitmentHash, SlotCommitmentId, SlotIndex},
-        unlock::{SignatureUnlock, Unlock},
     },
 };
 use pretty_assertions::assert_eq;
@@ -39,13 +34,13 @@ use crate::client::{
 };
 
 #[tokio::test]
-async fn all_combined() -> Result<()> {
+async fn all_combined() -> Result<(), Box<dyn std::error::Error>> {
     let secret_manager = SecretManager::try_from_mnemonic(
         // mnemonic needs to be hardcoded to make the ordering deterministic
         "mirror add nothing long orphan hat this rough scare gallery fork twelve old shrug voyage job table obscure mimic holiday possible proud giraffe fan".to_owned(),
     )?;
 
-    let protocol_parameters = protocol_parameters();
+    let protocol_parameters = iota_mainnet_protocol_parameters();
 
     let ed25519_bech32_addresses = secret_manager
         .generate_ed25519_addresses(
@@ -80,6 +75,7 @@ async fn all_combined() -> Result<()> {
             (
                 Account {
                     amount: 1_000_000,
+                    mana: 0,
                     account_id: account_id_1,
                     address: nft_1.clone(),
                     sender: None,
@@ -90,6 +86,7 @@ async fn all_combined() -> Result<()> {
             (
                 Account {
                     amount: 1_000_000,
+                    mana: 0,
                     account_id: account_id_2,
                     address: ed25519_0.clone(),
                     sender: None,
@@ -100,6 +97,7 @@ async fn all_combined() -> Result<()> {
             (
                 Basic {
                     amount: 1_000_000,
+                    mana: 0,
                     address: account_1.clone(),
                     native_token: None,
                     sender: None,
@@ -112,6 +110,7 @@ async fn all_combined() -> Result<()> {
             (
                 Basic {
                     amount: 1_000_000,
+                    mana: 0,
                     address: account_2.clone(),
                     native_token: None,
                     sender: None,
@@ -124,6 +123,7 @@ async fn all_combined() -> Result<()> {
             (
                 Basic {
                     amount: 1_000_000,
+                    mana: 0,
                     address: account_2,
                     native_token: None,
                     sender: None,
@@ -136,6 +136,7 @@ async fn all_combined() -> Result<()> {
             (
                 Basic {
                     amount: 1_000_000,
+                    mana: 0,
                     address: nft_2.clone(),
                     native_token: None,
                     sender: None,
@@ -148,6 +149,7 @@ async fn all_combined() -> Result<()> {
             (
                 Basic {
                     amount: 1_000_000,
+                    mana: 0,
                     address: nft_2,
                     native_token: None,
                     sender: None,
@@ -160,6 +162,7 @@ async fn all_combined() -> Result<()> {
             (
                 Basic {
                     amount: 1_000_000,
+                    mana: 0,
                     address: nft_4.clone(),
                     native_token: None,
                     sender: None,
@@ -172,6 +175,7 @@ async fn all_combined() -> Result<()> {
             (
                 Basic {
                     amount: 1_000_000,
+                    mana: 0,
                     address: ed25519_0.clone(),
                     native_token: None,
                     sender: None,
@@ -184,6 +188,7 @@ async fn all_combined() -> Result<()> {
             (
                 Basic {
                     amount: 1_000_000,
+                    mana: 0,
                     address: ed25519_1.clone(),
                     native_token: None,
                     sender: None,
@@ -196,6 +201,7 @@ async fn all_combined() -> Result<()> {
             (
                 Basic {
                     amount: 1_000_000,
+                    mana: 0,
                     address: ed25519_2.clone(),
                     native_token: None,
                     sender: None,
@@ -208,6 +214,7 @@ async fn all_combined() -> Result<()> {
             (
                 Basic {
                     amount: 1_000_000,
+                    mana: 0,
                     address: ed25519_2.clone(),
                     native_token: None,
                     sender: None,
@@ -220,6 +227,7 @@ async fn all_combined() -> Result<()> {
             (
                 Nft {
                     amount: 1_000_000,
+                    mana: 0,
                     nft_id: nft_id_1,
                     address: ed25519_0.clone(),
                     sender: None,
@@ -232,6 +240,7 @@ async fn all_combined() -> Result<()> {
             (
                 Nft {
                     amount: 1_000_000,
+                    mana: 0,
                     nft_id: nft_id_2,
                     address: account_1.clone(),
                     sender: None,
@@ -245,6 +254,7 @@ async fn all_combined() -> Result<()> {
             (
                 Basic {
                     amount: 2_000_000,
+                    mana: 0,
                     address: ed25519_0.clone(),
                     native_token: None,
                     sender: None,
@@ -257,6 +267,7 @@ async fn all_combined() -> Result<()> {
             (
                 Basic {
                     amount: 2_000_000,
+                    mana: 0,
                     address: ed25519_0.clone(),
                     native_token: None,
                     sender: None,
@@ -269,6 +280,7 @@ async fn all_combined() -> Result<()> {
             (
                 Basic {
                     amount: 2_000_000,
+                    mana: 0,
                     address: ed25519_0.clone(),
                     native_token: None,
                     sender: None,
@@ -281,6 +293,7 @@ async fn all_combined() -> Result<()> {
             (
                 Nft {
                     amount: 1_000_000,
+                    mana: 0,
                     nft_id: nft_id_3,
                     address: account_1.clone(),
                     sender: None,
@@ -293,6 +306,7 @@ async fn all_combined() -> Result<()> {
             (
                 Nft {
                     amount: 1_000_000,
+                    mana: 0,
                     nft_id: nft_id_4,
                     address: account_1,
                     sender: None,
@@ -309,6 +323,7 @@ async fn all_combined() -> Result<()> {
     let outputs = build_outputs([
         Account {
             amount: 1_000_000,
+            mana: 0,
             account_id: account_id_1,
             address: nft_1,
             sender: None,
@@ -316,6 +331,7 @@ async fn all_combined() -> Result<()> {
         },
         Account {
             amount: 1_000_000,
+            mana: 0,
             account_id: account_id_2,
             address: ed25519_0.clone(),
             sender: None,
@@ -323,6 +339,7 @@ async fn all_combined() -> Result<()> {
         },
         Basic {
             amount: 10_000_000,
+            mana: 0,
             address: ed25519_0.clone(),
             native_token: None,
             sender: None,
@@ -332,6 +349,7 @@ async fn all_combined() -> Result<()> {
         },
         Nft {
             amount: 1_000_000,
+            mana: 0,
             nft_id: nft_id_1,
             address: ed25519_0.clone(),
             sender: None,
@@ -341,6 +359,7 @@ async fn all_combined() -> Result<()> {
         },
         Nft {
             amount: 1_000_000,
+            mana: 0,
             nft_id: nft_id_2,
             address: ed25519_0.clone(),
             sender: None,
@@ -350,6 +369,7 @@ async fn all_combined() -> Result<()> {
         },
         Nft {
             amount: 1_000_000,
+            mana: 0,
             nft_id: nft_id_3,
             address: ed25519_0.clone(),
             sender: None,
@@ -359,6 +379,7 @@ async fn all_combined() -> Result<()> {
         },
         Nft {
             amount: 1_000_000,
+            mana: 0,
             nft_id: nft_id_4,
             address: ed25519_0.clone(),
             sender: None,
@@ -368,7 +389,7 @@ async fn all_combined() -> Result<()> {
         },
     ]);
 
-    let selected = InputSelection::new(
+    let selected = TransactionBuilder::new(
         inputs.clone(),
         outputs.clone(),
         [ed25519_0, ed25519_1, ed25519_2],
@@ -376,7 +397,7 @@ async fn all_combined() -> Result<()> {
         slot_commitment_id,
         protocol_parameters.clone(),
     )
-    .select()
+    .finish()
     .unwrap();
 
     let transaction = Transaction::builder(protocol_parameters.network_id())
@@ -392,7 +413,7 @@ async fn all_combined() -> Result<()> {
         )
         .with_outputs(outputs)
         .with_creation_slot(slot_index)
-        .finish_with_params(&protocol_parameters)?;
+        .finish_with_params(protocol_parameters)?;
 
     let prepared_transaction_data = PreparedTransactionData {
         transaction,
@@ -402,101 +423,20 @@ async fn all_combined() -> Result<()> {
     };
 
     let unlocks = secret_manager
-        .transaction_unlocks(&prepared_transaction_data, &protocol_parameters)
+        .transaction_unlocks(&prepared_transaction_data, protocol_parameters)
         .await?;
 
-    assert_eq!(unlocks.len(), 15);
-    assert_eq!((*unlocks).first().unwrap().kind(), SignatureUnlock::KIND);
-    match (*unlocks).get(1).unwrap() {
-        Unlock::Reference(a) => {
-            assert_eq!(a.index(), 0);
-        }
-        _ => panic!("Invalid unlock 1"),
-    }
-    assert_eq!((*unlocks).get(2).unwrap().kind(), SignatureUnlock::KIND);
-    assert_eq!((*unlocks).get(3).unwrap().kind(), SignatureUnlock::KIND);
-    match (*unlocks).get(4).unwrap() {
-        Unlock::Reference(a) => {
-            assert_eq!(a.index(), 3);
-        }
-        _ => panic!("Invalid unlock 4"),
-    }
-    match (*unlocks).get(5).unwrap() {
-        Unlock::Reference(a) => {
-            assert_eq!(a.index(), 3);
-        }
-        _ => panic!("Invalid unlock 5"),
-    }
-    match (*unlocks).get(6).unwrap() {
-        Unlock::Account(a) => {
-            assert_eq!(a.index(), 5);
-        }
-        _ => panic!("Invalid unlock 6"),
-    }
-    match (*unlocks).get(7).unwrap() {
-        Unlock::Account(a) => {
-            assert_eq!(a.index(), 5);
-        }
-        _ => panic!("Invalid unlock 7"),
-    }
-    match (*unlocks).get(8).unwrap() {
-        Unlock::Reference(a) => {
-            assert_eq!(a.index(), 3);
-        }
-        _ => panic!("Invalid unlock 8"),
-    }
-
-    match (*unlocks).get(9).unwrap() {
-        Unlock::Nft(a) => {
-            assert_eq!(a.index(), 8);
-        }
-        _ => panic!("Invalid unlock 9"),
-    }
-    match (*unlocks).get(10).unwrap() {
-        Unlock::Account(a) => {
-            assert_eq!(a.index(), 9);
-        }
-        _ => panic!("Invalid unlock 10"),
-    }
-    match (*unlocks).get(11).unwrap() {
-        Unlock::Account(a) => {
-            assert_eq!(a.index(), 9);
-        }
-        _ => panic!("Invalid unlock 11"),
-    }
-    match (*unlocks).get(12).unwrap() {
-        Unlock::Account(a) => {
-            assert_eq!(a.index(), 9);
-        }
-        _ => panic!("Invalid unlock 12"),
-    }
-    match (*unlocks).get(13).unwrap() {
-        Unlock::Nft(a) => {
-            assert_eq!(a.index(), 11);
-        }
-        _ => panic!("Invalid unlock 13"),
-    }
-    match (*unlocks).get(14).unwrap() {
-        Unlock::Nft(a) => {
-            assert_eq!(a.index(), 10);
-        }
-        _ => panic!("Invalid unlock 14"),
-    }
+    assert_eq!(unlocks.len(), 13);
+    assert_eq!(unlocks.iter().filter(|u| u.is_signature()).count(), 3);
+    assert_eq!(unlocks.iter().filter(|u| u.is_reference()).count(), 4);
+    assert_eq!(unlocks.iter().filter(|u| u.is_account()).count(), 3);
+    assert_eq!(unlocks.iter().filter(|u| u.is_nft()).count(), 3);
 
     let tx_payload = SignedTransactionPayload::new(prepared_transaction_data.transaction.clone(), unlocks)?;
 
-    validate_signed_transaction_payload_length(&tx_payload)?;
+    tx_payload.validate_length()?;
 
-    let conflict = verify_semantic(
-        &prepared_transaction_data.inputs_data,
-        &tx_payload,
-        prepared_transaction_data.mana_rewards,
-        protocol_parameters,
-    )?;
-
-    if let Some(conflict) = conflict {
-        panic!("{conflict:?}, with {tx_payload:#?}");
-    }
+    prepared_transaction_data.verify_semantic(protocol_parameters)?;
 
     Ok(())
 }

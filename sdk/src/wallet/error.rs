@@ -6,25 +6,42 @@ use std::fmt::Debug;
 use crypto::keys::bip44::Bip44;
 use serde::{ser::Serializer, Serialize};
 
-use crate::types::block::{address::Bech32Address, output::DelegationId, payload::signed_transaction::TransactionId};
+use crate::{
+    client::ClientError,
+    types::block::{
+        address::Bech32Address,
+        context_input::ContextInputError,
+        input::InputError,
+        mana::ManaError,
+        output::{
+            feature::FeatureError, unlock_condition::UnlockConditionError, DelegationId, NativeTokenError, OutputError,
+            TokenSchemeError,
+        },
+        payload::{signed_transaction::TransactionId, PayloadError},
+        signature::SignatureError,
+        unlock::UnlockError,
+        BlockError,
+    },
+    utils::ConversionError,
+};
 
 /// The wallet error type.
 #[derive(Debug, thiserror::Error, strum::AsRefStr)]
 #[strum(serialize_all = "camelCase")]
 #[non_exhaustive]
-pub enum Error {
+pub enum WalletError {
     /// Errors during backup creation or restoring
     #[error("backup failed {0}")]
     Backup(&'static str),
     /// Error from block crate.
     #[error("{0}")]
-    Block(Box<crate::types::block::Error>),
+    Block(#[from] BlockError),
     /// Burning or melting failed
     #[error("burning or melting failed: {0}")]
     BurningOrMeltingFailed(String),
     /// Client error.
     #[error("`{0}`")]
-    Client(Box<crate::client::Error>),
+    Client(#[from] ClientError),
     /// BIP44 coin type mismatch
     #[error("BIP44 mismatch: {new_bip_path:?}, existing bip path is: {old_bip_path:?}")]
     BipPathMismatch {
@@ -56,6 +73,9 @@ pub enum Error {
     /// Invalid output kind.
     #[error("invalid output kind: {0}")]
     InvalidOutputKind(String),
+    /// Invalid parameter.
+    #[error("invalid parameter: {0}")]
+    InvalidParameter(&'static str),
     /// Invalid Voting Power
     #[cfg(feature = "participation")]
     #[cfg_attr(docsrs, doc(cfg(feature = "participation")))]
@@ -132,16 +152,18 @@ pub enum Error {
     AccountNotFound,
     #[error("staking failed: {0}")]
     StakingFailed(String),
+    #[error("{0}")]
+    Convert(#[from] ConversionError),
 }
 
-impl Error {
+impl WalletError {
     pub fn other<E: 'static + std::error::Error + Send + Sync>(err: E) -> Self {
         Self::Other(Box::new(err) as _)
     }
 }
 
 // Serialize type with Display error
-impl Serialize for Error {
+impl Serialize for WalletError {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
@@ -161,49 +183,52 @@ impl Serialize for Error {
     }
 }
 
-impl From<crate::types::block::Error> for Error {
-    fn from(error: crate::types::block::Error) -> Self {
-        Self::Block(Box::new(error))
-    }
-}
-
-impl From<crate::client::Error> for Error {
-    fn from(error: crate::client::Error) -> Self {
-        Self::Client(Box::new(error))
-    }
-}
-
-impl From<crate::client::api::input_selection::Error> for Error {
-    fn from(error: crate::client::api::input_selection::Error) -> Self {
+impl From<crate::client::api::transaction_builder::TransactionBuilderError> for WalletError {
+    fn from(error: crate::client::api::transaction_builder::TransactionBuilderError) -> Self {
         // Map "same" error so it's easier to handle
         match error {
-            crate::client::api::input_selection::Error::InsufficientAmount { found, required } => {
-                Self::InsufficientFunds {
-                    available: found,
-                    required,
-                }
-            }
-            _ => Self::Client(Box::new(crate::client::Error::InputSelection(error))),
+            crate::client::api::transaction_builder::TransactionBuilderError::InsufficientAmount {
+                found,
+                required,
+            } => Self::InsufficientFunds {
+                available: found,
+                required,
+            },
+            _ => Self::Client(ClientError::TransactionBuilder(error)),
         }
     }
 }
 
+crate::impl_from_error_via!(WalletError via BlockError:
+    PayloadError,
+    OutputError,
+    InputError,
+    NativeTokenError,
+    ManaError,
+    UnlockConditionError,
+    FeatureError,
+    TokenSchemeError,
+    ContextInputError,
+    UnlockError,
+    SignatureError,
+);
+
 #[cfg(feature = "stronghold")]
-impl From<crate::client::stronghold::Error> for Error {
+impl From<crate::client::stronghold::Error> for WalletError {
     fn from(error: crate::client::stronghold::Error) -> Self {
-        Self::Client(Box::new(crate::client::Error::Stronghold(error)))
+        Self::Client(ClientError::Stronghold(error))
     }
 }
 
 #[cfg(feature = "ledger_nano")]
-impl From<crate::client::secret::ledger_nano::Error> for Error {
+impl From<crate::client::secret::ledger_nano::Error> for WalletError {
     fn from(error: crate::client::secret::ledger_nano::Error) -> Self {
-        Self::Client(Box::new(crate::client::Error::Ledger(error)))
+        Self::Client(ClientError::from(error))
     }
 }
 
 #[cfg(feature = "rocksdb")]
-impl From<rocksdb::Error> for Error {
+impl From<rocksdb::Error> for WalletError {
     fn from(error: rocksdb::Error) -> Self {
         Self::Storage(error.to_string())
     }

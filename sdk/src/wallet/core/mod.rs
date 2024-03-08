@@ -40,21 +40,27 @@ use crate::{
         },
         TryFromDto,
     },
-    wallet::{operations::syncing::SyncOptions, types::OutputData, Error, FilterOptions, Result},
+    wallet::{operations::syncing::SyncOptions, types::OutputData, FilterOptions, WalletError},
 };
 
 /// The stateful wallet used to interact with an IOTA network.
 #[derive(Debug)]
 pub struct Wallet<S: SecretManage = SecretManager> {
+    pub(crate) address: Arc<RwLock<Bech32Address>>,
+    pub(crate) bip_path: Arc<RwLock<Option<Bip44>>>,
+    pub(crate) alias: Arc<RwLock<Option<String>>>,
     pub(crate) inner: Arc<WalletInner<S>>,
-    pub(crate) data: Arc<RwLock<WalletData>>,
+    pub(crate) ledger: Arc<RwLock<WalletLedger>>,
 }
 
 impl<S: SecretManage> Clone for Wallet<S> {
     fn clone(&self) -> Self {
         Self {
+            address: self.address.clone(),
+            bip_path: self.bip_path.clone(),
+            alias: self.alias.clone(),
             inner: self.inner.clone(),
-            data: self.data.clone(),
+            ledger: self.ledger.clone(),
         }
     }
 }
@@ -69,7 +75,7 @@ impl<S: SecretManage> core::ops::Deref for Wallet<S> {
 
 impl<S: 'static + SecretManage> Wallet<S>
 where
-    crate::wallet::Error: From<S::Error>,
+    WalletError: From<S::Error>,
 {
     /// Initialises the wallet builder.
     pub fn builder() -> WalletBuilder<S> {
@@ -100,15 +106,9 @@ pub struct WalletInner<S: SecretManage = SecretManager> {
     pub(crate) storage_manager: StorageManager,
 }
 
-/// Wallet data.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct WalletData {
-    /// The wallet BIP44 path.
-    pub(crate) bip_path: Option<Bip44>,
-    /// The wallet address.
-    pub(crate) address: Bech32Address,
-    /// The wallet alias.
-    pub(crate) alias: Option<String>,
+/// Wallet ledger.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct WalletLedger {
     /// Outputs
     // stored separated from the wallet for performance?
     pub(crate) outputs: HashMap<OutputId, OutputData>,
@@ -137,23 +137,7 @@ pub struct WalletData {
     pub(crate) native_token_foundries: HashMap<FoundryId, FoundryOutput>,
 }
 
-impl WalletData {
-    pub(crate) fn new(bip_path: Option<Bip44>, address: Bech32Address, alias: Option<String>) -> Self {
-        Self {
-            bip_path,
-            address,
-            alias,
-            outputs: HashMap::new(),
-            locked_outputs: HashSet::new(),
-            unspent_outputs: HashMap::new(),
-            transactions: HashMap::new(),
-            pending_transactions: HashSet::new(),
-            incoming_transactions: HashMap::new(),
-            inaccessible_incoming_transactions: HashSet::new(),
-            native_token_foundries: HashMap::new(),
-        }
-    }
-
+impl WalletLedger {
     fn filter_outputs<'a>(
         outputs: impl Iterator<Item = &'a OutputData>,
         filter: FilterOptions,
@@ -355,42 +339,13 @@ impl WalletData {
     }
 }
 
-impl<S: 'static + SecretManage> Wallet<S>
-where
-    crate::wallet::Error: From<S::Error>,
-    crate::client::Error: From<S::Error>,
-{
-    /// Create a new wallet.
-    pub(crate) async fn new(inner: Arc<WalletInner<S>>, data: WalletData) -> Result<Self> {
-        #[cfg(feature = "storage")]
-        let default_sync_options = inner
-            .storage_manager
-            .get_default_sync_options()
-            .await?
-            .unwrap_or_default();
-        #[cfg(not(feature = "storage"))]
-        let default_sync_options = Default::default();
-
-        // TODO: maybe move this into a `reset` fn or smth to avoid this kinda-weird block.
-        {
-            let mut last_synced = inner.last_synced.lock().await;
-            *last_synced = Default::default();
-            let mut sync_options = inner.default_sync_options.lock().await;
-            *sync_options = default_sync_options;
-        }
-
-        Ok(Self {
-            inner,
-            data: Arc::new(RwLock::new(data)),
-        })
-    }
-
+impl<S: 'static + SecretManage> Wallet<S> {
     /// Get the [`Output`] that minted a native token by the token ID. First try to get it
     /// from the wallet, if it isn't in the wallet try to get it from the node
-    pub async fn get_foundry_output(&self, native_token_id: TokenId) -> Result<Output> {
+    pub async fn get_foundry_output(&self, native_token_id: TokenId) -> Result<Output, WalletError> {
         let foundry_id = FoundryId::from(native_token_id);
 
-        for output_data in self.data.read().await.outputs.values() {
+        for output_data in self.ledger.read().await.outputs.values() {
             if let Output::Foundry(foundry_output) = &output_data.output {
                 if foundry_output.id() == foundry_id {
                     return Ok(output_data.output.clone());
@@ -410,12 +365,45 @@ where
         self.inner.emit(wallet_event).await
     }
 
-    pub async fn data(&self) -> tokio::sync::RwLockReadGuard<'_, WalletData> {
-        self.data.read().await
+    /// Get the wallet address.
+    pub async fn address(&self) -> Bech32Address {
+        self.address.read().await.clone()
     }
 
-    pub(crate) async fn data_mut(&self) -> tokio::sync::RwLockWriteGuard<'_, WalletData> {
-        self.data.write().await
+    pub(crate) async fn address_mut(&self) -> tokio::sync::RwLockWriteGuard<'_, Bech32Address> {
+        self.address.write().await
+    }
+
+    /// Get the wallet's Bech32 HRP.
+    pub async fn bech32_hrp(&self) -> Hrp {
+        self.address.read().await.hrp
+    }
+
+    /// Get the wallet's bip path.
+    pub async fn bip_path(&self) -> Option<Bip44> {
+        *self.bip_path.read().await
+    }
+
+    pub(crate) async fn bip_path_mut(&self) -> tokio::sync::RwLockWriteGuard<'_, Option<Bip44>> {
+        self.bip_path.write().await
+    }
+
+    /// Get the alias of the wallet if one was set.
+    pub async fn alias(&self) -> Option<String> {
+        self.alias.read().await.clone()
+    }
+
+    pub(crate) async fn alias_mut(&self) -> tokio::sync::RwLockWriteGuard<'_, Option<String>> {
+        self.alias.write().await
+    }
+
+    /// Get the wallet's ledger state.
+    pub async fn ledger(&self) -> tokio::sync::RwLockReadGuard<'_, WalletLedger> {
+        self.ledger.read().await
+    }
+
+    pub(crate) async fn ledger_mut(&self) -> tokio::sync::RwLockWriteGuard<'_, WalletLedger> {
+        self.ledger.write().await
     }
 
     #[cfg(feature = "storage")]
@@ -423,19 +411,9 @@ where
         &self.storage_manager
     }
 
-    /// Get the alias of the wallet if one was set.
-    pub async fn alias(&self) -> Option<String> {
-        self.data().await.alias.clone()
-    }
-
-    /// Get the wallet address.
-    pub async fn address(&self) -> Bech32Address {
-        self.data().await.address.clone()
-    }
-
     /// Returns the implicit account creation address of the wallet if it is Ed25519 based.
-    pub async fn implicit_account_creation_address(&self) -> Result<Bech32Address> {
-        let bech32_address = &self.data().await.address;
+    pub async fn implicit_account_creation_address(&self) -> Result<Bech32Address, WalletError> {
+        let bech32_address = &self.address().await;
 
         if let Address::Ed25519(address) = bech32_address.inner() {
             Ok(Bech32Address::new(
@@ -443,28 +421,18 @@ where
                 ImplicitAccountCreationAddress::from(*address),
             ))
         } else {
-            Err(Error::NonEd25519Address)
+            Err(WalletError::NonEd25519Address)
         }
-    }
-
-    /// Get the wallet's configured Bech32 HRP.
-    pub async fn bech32_hrp(&self) -> Hrp {
-        self.data().await.address.hrp
-    }
-
-    /// Get the wallet's configured bip path.
-    pub async fn bip_path(&self) -> Option<Bip44> {
-        self.data().await.bip_path
     }
 }
 
 impl<S: SecretManage> WalletInner<S> {
-    /// Get the [SecretManager]
-    pub fn get_secret_manager(&self) -> &Arc<RwLock<S>> {
+    /// Get the [`SecretManager`] of the wallet.
+    pub fn secret_manager(&self) -> &Arc<RwLock<S>> {
         &self.secret_manager
     }
 
-    /// Listen to wallet events, empty vec will listen to all events
+    /// Listen to wallet events, empty vec will listen to all events.
     #[cfg(feature = "events")]
     #[cfg_attr(docsrs, doc(cfg(feature = "events")))]
     pub async fn listen<F, I: IntoIterator<Item = WalletEventType> + Send>(&self, events: I, handler: F)
@@ -476,7 +444,7 @@ impl<S: SecretManage> WalletInner<S> {
         emitter.on(events, handler);
     }
 
-    /// Remove wallet event listeners, empty vec will remove all listeners
+    /// Remove wallet event listeners, empty vec will remove all listeners.
     #[cfg(feature = "events")]
     #[cfg_attr(docsrs, doc(cfg(feature = "events")))]
     pub async fn clear_listeners<I: IntoIterator<Item = WalletEventType> + Send>(&self, events: I)
@@ -488,12 +456,12 @@ impl<S: SecretManage> WalletInner<S> {
     }
 
     /// Generates a new random mnemonic.
-    pub fn generate_mnemonic(&self) -> crate::wallet::Result<Mnemonic> {
+    pub fn generate_mnemonic(&self) -> Result<Mnemonic, WalletError> {
         Ok(Client::generate_mnemonic()?)
     }
 
     /// Verify that a &str is a valid mnemonic.
-    pub fn verify_mnemonic(&self, mnemonic: &MnemonicRef) -> crate::wallet::Result<()> {
+    pub fn verify_mnemonic(&self, mnemonic: &MnemonicRef) -> Result<(), WalletError> {
         verify_mnemonic(mnemonic)?;
         Ok(())
     }
@@ -523,13 +491,10 @@ impl<S: SecretManage> Drop for WalletInner<S> {
     }
 }
 
-/// Dto for the wallet data.
+/// Dto for the wallet ledger.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct WalletDataDto {
-    pub bip_path: Option<Bip44>,
-    pub address: Bech32Address,
-    pub alias: Option<String>,
+pub struct WalletLedgerDto {
     pub outputs: HashMap<OutputId, OutputData>,
     pub locked_outputs: HashSet<OutputId>,
     pub unspent_outputs: HashMap<OutputId, OutputData>,
@@ -540,17 +505,14 @@ pub struct WalletDataDto {
     pub native_token_foundries: HashMap<FoundryId, FoundryOutput>,
 }
 
-impl TryFromDto<WalletDataDto> for WalletData {
-    type Error = crate::wallet::Error;
+impl TryFromDto<WalletLedgerDto> for WalletLedger {
+    type Error = WalletError;
 
     fn try_from_dto_with_params_inner(
-        dto: WalletDataDto,
+        dto: WalletLedgerDto,
         params: Option<&ProtocolParameters>,
     ) -> core::result::Result<Self, Self::Error> {
         Ok(Self {
-            bip_path: dto.bip_path,
-            address: dto.address,
-            alias: dto.alias,
             outputs: dto.outputs,
             locked_outputs: dto.locked_outputs,
             unspent_outputs: dto.unspent_outputs,
@@ -558,25 +520,22 @@ impl TryFromDto<WalletDataDto> for WalletData {
                 .transactions
                 .into_iter()
                 .map(|(id, o)| Ok((id, TransactionWithMetadata::try_from_dto_with_params_inner(o, params)?)))
-                .collect::<crate::wallet::Result<_>>()?,
+                .collect::<Result<_, WalletError>>()?,
             pending_transactions: dto.pending_transactions,
             incoming_transactions: dto
                 .incoming_transactions
                 .into_iter()
                 .map(|(id, o)| Ok((id, TransactionWithMetadata::try_from_dto_with_params_inner(o, params)?)))
-                .collect::<crate::wallet::Result<_>>()?,
+                .collect::<Result<_, WalletError>>()?,
             inaccessible_incoming_transactions: Default::default(),
             native_token_foundries: dto.native_token_foundries,
         })
     }
 }
 
-impl From<&WalletData> for WalletDataDto {
-    fn from(value: &WalletData) -> Self {
+impl From<&WalletLedger> for WalletLedgerDto {
+    fn from(value: &WalletLedger) -> Self {
         Self {
-            bip_path: value.bip_path,
-            address: value.address.clone(),
-            alias: value.alias.clone(),
             outputs: value.outputs.clone(),
             locked_outputs: value.locked_outputs.clone(),
             unspent_outputs: value.unspent_outputs.clone(),
@@ -596,7 +555,7 @@ impl From<&WalletData> for WalletDataDto {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "protocol_parameters_samples"))]
 mod test {
     use core::str::FromStr;
 
@@ -607,9 +566,9 @@ mod test {
         types::block::{
             address::{Address, Ed25519Address},
             input::{Input, UtxoInput},
-            output::{AddressUnlockCondition, BasicOutput, Output, StorageScoreParameters},
+            output::{AddressUnlockCondition, BasicOutput, Output},
             payload::signed_transaction::{SignedTransactionPayload, Transaction, TransactionId},
-            protocol::ProtocolParameters,
+            protocol::iota_mainnet_protocol_parameters,
             rand::mana::rand_mana_allotment,
             signature::{Ed25519Signature, Signature},
             unlock::{ReferenceUnlock, SignatureUnlock, Unlock, Unlocks},
@@ -624,17 +583,7 @@ mod test {
 
     #[test]
     fn serialize() {
-        let protocol_parameters = ProtocolParameters::new(
-            2,
-            "testnet",
-            "rms",
-            StorageScoreParameters::new(500, 1, 10, 1, 1, 1),
-            1_813_620_509_061_365,
-            1582328545,
-            10,
-            20,
-        )
-        .unwrap();
+        let protocol_parameters = iota_mainnet_protocol_parameters();
 
         let transaction_id = TransactionId::new(prefix_hex::decode(TRANSACTION_ID).unwrap());
         let input1 = Input::Utxo(UtxoInput::new(transaction_id, 0));
@@ -651,8 +600,8 @@ mod test {
         let transaction = Transaction::builder(protocol_parameters.network_id())
             .with_inputs([input1, input2])
             .add_output(output)
-            .add_mana_allotment(rand_mana_allotment(&protocol_parameters))
-            .finish_with_params(&protocol_parameters)
+            .add_mana_allotment(rand_mana_allotment(protocol_parameters))
+            .finish_with_params(protocol_parameters)
             .unwrap();
 
         let pub_key_bytes = prefix_hex::decode(ED25519_PUBLIC_KEY).unwrap();
@@ -686,13 +635,7 @@ mod test {
             incoming_transaction,
         );
 
-        let wallet_data = WalletData {
-            bip_path: Some(Bip44::new(4218)),
-            address: crate::types::block::address::Bech32Address::from_str(
-                "rms1qpllaj0pyveqfkwxmnngz2c488hfdtmfrj3wfkgxtk4gtyrax0jaxzt70zy",
-            )
-            .unwrap(),
-            alias: Some("Alice".to_string()),
+        let wallet_ledger = WalletLedger {
             outputs: HashMap::new(),
             locked_outputs: HashSet::new(),
             unspent_outputs: HashMap::new(),
@@ -703,29 +646,22 @@ mod test {
             native_token_foundries: HashMap::new(),
         };
 
-        let deser_wallet_data = WalletData::try_from_dto(
-            serde_json::from_str::<WalletDataDto>(&serde_json::to_string(&WalletDataDto::from(&wallet_data)).unwrap())
-                .unwrap(),
+        let deser_wallet_ledger = WalletLedger::try_from_dto(
+            serde_json::from_str::<WalletLedgerDto>(
+                &serde_json::to_string(&WalletLedgerDto::from(&wallet_ledger)).unwrap(),
+            )
+            .unwrap(),
         )
         .unwrap();
 
-        assert_eq!(wallet_data, deser_wallet_data);
+        assert_eq!(wallet_ledger, deser_wallet_ledger);
     }
 
-    impl WalletData {
-        /// Returns a mock of this type with the following values:
-        /// index: 0, coin_type: 4218, alias: "Alice", address:
-        /// rms1qpllaj0pyveqfkwxmnngz2c488hfdtmfrj3wfkgxtk4gtyrax0jaxzt70zy, all other fields are set to their Rust
-        /// defaults.
+    impl WalletLedger {
+        // TODO: use something non-empty
         #[cfg(feature = "storage")]
-        pub(crate) fn mock() -> Self {
+        pub(crate) fn test_instance() -> Self {
             Self {
-                bip_path: Some(Bip44::new(4218)),
-                address: crate::types::block::address::Bech32Address::from_str(
-                    "rms1qpllaj0pyveqfkwxmnngz2c488hfdtmfrj3wfkgxtk4gtyrax0jaxzt70zy",
-                )
-                .unwrap(),
-                alias: Some("Alice".to_string()),
                 outputs: HashMap::new(),
                 locked_outputs: HashSet::new(),
                 unspent_outputs: HashMap::new(),

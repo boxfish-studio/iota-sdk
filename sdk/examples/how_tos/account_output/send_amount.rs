@@ -7,14 +7,14 @@
 //! `cargo run --release --all-features --example account_output_send_amount`
 
 use iota_sdk::{
-    client::node_api::indexer::query_parameters::BasicOutputQueryParameters,
+    client::{api::options::TransactionOptions, node_api::indexer::query_parameters::BasicOutputQueryParameters},
     types::block::address::{AccountAddress, ToBech32Ext},
-    wallet::{AccountSyncOptions, Result, SyncOptions, TransactionOptions},
+    wallet::{AccountSyncOptions, SyncOptions},
     Wallet,
 };
 
 #[tokio::main]
-async fn main() -> Result<()> {
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // This example uses secrets in environment variables for simplicity which should not be done in production.
     dotenvy::dotenv().ok();
 

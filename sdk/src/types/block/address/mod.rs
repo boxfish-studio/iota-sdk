@@ -5,6 +5,7 @@ mod account;
 mod anchor;
 mod bech32;
 mod ed25519;
+mod error;
 mod implicit_account_creation;
 mod multi;
 mod nft;
@@ -21,23 +22,21 @@ pub use self::{
     anchor::AnchorAddress,
     bech32::{Bech32Address, Hrp},
     ed25519::Ed25519Address,
+    error::AddressError,
     implicit_account_creation::ImplicitAccountCreationAddress,
     multi::{MultiAddress, WeightedAddress},
     nft::NftAddress,
     restricted::{AddressCapabilities, AddressCapabilityFlag, RestrictedAddress},
 };
 use crate::{
-    types::block::{
-        output::{StorageScore, StorageScoreParameters},
-        Error,
-    },
+    types::block::output::{StorageScore, StorageScoreParameters},
     utils::ConvertTo,
 };
 
 /// A generic address supporting different address kinds.
 #[derive(Clone, Eq, PartialEq, Ord, PartialOrd, Hash, From, Display, Packable)]
-#[packable(tag_type = u8, with_error = Error::InvalidAddressKind)]
-#[packable(unpack_error = Error)]
+#[packable(tag_type = u8, with_error = AddressError::Kind)]
+#[packable(unpack_error = AddressError)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize), serde(untagged))]
 pub enum Address {
     /// An Ed25519 address.
@@ -133,7 +132,7 @@ impl Address {
     }
 
     /// Tries to create an [`Address`] from a bech32 encoded string.
-    pub fn try_from_bech32(address: impl AsRef<str>) -> Result<Self, Error> {
+    pub fn try_from_bech32(address: impl AsRef<str>) -> Result<Self, AddressError> {
         Bech32Address::try_from_str(address).map(|res| res.inner)
     }
 
@@ -160,7 +159,7 @@ impl StorageScore for Address {
 
 pub trait ToBech32Ext: Sized {
     /// Try to encode this address to a bech32 string with the given Human Readable Part as prefix.
-    fn try_to_bech32(self, hrp: impl ConvertTo<Hrp>) -> Result<Bech32Address, Error>;
+    fn try_to_bech32(self, hrp: impl ConvertTo<Hrp>) -> Result<Bech32Address, AddressError>;
 
     /// Encodes this address to a bech32 string with the given Human Readable Part as prefix.
     fn to_bech32(self, hrp: Hrp) -> Bech32Address;
@@ -171,7 +170,7 @@ pub trait ToBech32Ext: Sized {
 }
 
 impl<T: Into<Address>> ToBech32Ext for T {
-    fn try_to_bech32(self, hrp: impl ConvertTo<Hrp>) -> Result<Bech32Address, Error> {
+    fn try_to_bech32(self, hrp: impl ConvertTo<Hrp>) -> Result<Bech32Address, AddressError> {
         Bech32Address::try_new(hrp, self)
     }
 

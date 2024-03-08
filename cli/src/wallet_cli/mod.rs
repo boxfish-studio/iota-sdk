@@ -7,8 +7,9 @@ use std::str::FromStr;
 
 use clap::{CommandFactory, Parser, Subcommand};
 use colored::Colorize;
+use eyre::Error;
 use iota_sdk::{
-    client::{request_funds_from_faucet, secret::SecretManager},
+    client::{api::options::TransactionOptions, request_funds_from_faucet, secret::SecretManager},
     types::block::{
         address::{AccountAddress, Bech32Address, ToBech32Ext},
         mana::ManaAllotment,
@@ -20,12 +21,13 @@ use iota_sdk::{
         },
         payload::signed_transaction::TransactionId,
         slot::SlotIndex,
+        IdentifierError,
     },
     utils::ConvertTo,
     wallet::{
         types::OutputData, BeginStakingParams, ConsolidationParams, CreateDelegationParams, CreateNativeTokenParams,
-        Error as WalletError, MintNftParams, OutputsToClaim, SendNativeTokenParams, SendNftParams, SendParams,
-        SyncOptions, TransactionOptions, Wallet,
+        MintNftParams, OutputsToClaim, ReturnStrategy, SendManaParams, SendNativeTokenParams, SendNftParams,
+        SendParams, SyncOptions, Wallet, WalletError,
     },
     U256,
 };
@@ -33,7 +35,6 @@ use rustyline::{error::ReadlineError, history::MemHistory, Config, Editor};
 
 use self::completer::WalletCommandHelper;
 use crate::{
-    error::Error,
     helper::{bytes_from_hex_or_file, get_password, to_utc_date_time},
     println_log_error, println_log_info,
 };
@@ -53,7 +54,7 @@ impl WalletCli {
 }
 
 /// Commands
-#[derive(Debug, Subcommand, strum::EnumVariantNames)]
+#[derive(Debug, Subcommand, strum::VariantNames)]
 #[strum(serialize_all = "kebab-case")]
 #[allow(clippy::large_enum_variant)]
 pub enum WalletCommand {
@@ -272,6 +273,16 @@ pub enum WalletCommand {
         #[arg(long, default_value_t = false)]
         allow_micro_amount: bool,
     },
+    /// Send mana.
+    SendMana {
+        /// Recipient address, e.g. rms1qztwng6cty8cfm42nzvq099ev7udhrnk0rw8jt8vttf9kpqnxhpsx869vr3.
+        address: Bech32Address,
+        /// Amount of mana to send, e.g. 1000000.
+        mana: u64,
+        /// Whether to gift the storage deposit or not.
+        #[arg(short, long, default_value_t = false)]
+        gift: bool,
+    },
     /// Send a native token.
     /// This will create an output with an expiration and storage deposit return unlock condition.
     SendNativeToken {
@@ -348,7 +359,7 @@ pub enum WalletCommand {
 }
 
 fn parse_u256(s: &str) -> Result<U256, Error> {
-    U256::from_dec_str(s).map_err(|e| Error::Miscellaneous(e.to_string()))
+    Ok(U256::from_dec_str(s)?)
 }
 
 /// Select by transaction ID or list index
@@ -359,7 +370,7 @@ pub enum TransactionSelector {
 }
 
 impl FromStr for TransactionSelector {
-    type Err = Error;
+    type Err = IdentifierError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         Ok(if let Ok(index) = s.parse() {
@@ -378,7 +389,7 @@ pub enum OutputSelector {
 }
 
 impl FromStr for OutputSelector {
-    type Err = Error;
+    type Err = IdentifierError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         Ok(if let Ok(index) = s.parse() {
@@ -391,8 +402,8 @@ impl FromStr for OutputSelector {
 
 // `accounts` command
 pub async fn accounts_command(wallet: &Wallet) -> Result<(), Error> {
-    let wallet_data = wallet.data().await;
-    let accounts = wallet_data.accounts();
+    let wallet_ledger = wallet.ledger().await;
+    let accounts = wallet_ledger.accounts();
     let hrp = wallet.client().get_bech32_hrp().await?;
 
     println_log_info!("Accounts:\n");
@@ -430,9 +441,9 @@ pub async fn address_command(wallet: &Wallet) -> Result<(), Error> {
 // `allot-mana` command
 pub async fn allot_mana_command(wallet: &Wallet, mana: u64, account_id: Option<AccountId>) -> Result<(), Error> {
     let account_id = {
-        let wallet_data = wallet.data().await;
+        let wallet_ledger = wallet.ledger().await;
         account_id
-            .or_else(|| wallet_data.first_account_id())
+            .or_else(|| wallet_ledger.first_account_id())
             .ok_or(WalletError::AccountNotFound)?
     };
 
@@ -565,9 +576,9 @@ pub async fn claim_command(wallet: &Wallet, output_id: Option<OutputId>) -> Resu
 /// `claimable-outputs` command
 pub async fn claimable_outputs_command(wallet: &Wallet) -> Result<(), Error> {
     for output_id in wallet.claimable_outputs(OutputsToClaim::All).await? {
-        let wallet_data = wallet.data().await;
+        let wallet_ledger = wallet.ledger().await;
         // Unwrap: for the iterated `OutputId`s this call will always return `Some(...)`.
-        let output = &wallet_data.get_output(&output_id).unwrap().output;
+        let output = &wallet_ledger.get_output(&output_id).unwrap().output;
         let kind = match output {
             Output::Nft(_) => "Nft",
             Output::Basic(_) => "Basic",
@@ -613,9 +624,9 @@ pub async fn congestion_command(
     work_score: Option<u32>,
 ) -> Result<(), Error> {
     let account_id = {
-        let wallet_data = wallet.data().await;
+        let wallet_ledger = wallet.ledger().await;
         account_id
-            .or_else(|| wallet_data.first_account_id())
+            .or_else(|| wallet_ledger.first_account_id())
             .ok_or(WalletError::AccountNotFound)?
     };
 
@@ -796,7 +807,7 @@ pub async fn destroy_foundry_command(wallet: &Wallet, foundry_id: FoundryId) -> 
 pub async fn end_staking_command(wallet: &Wallet, account_id: AccountId) -> Result<(), Error> {
     println_log_info!("Ending staking for {account_id}.");
 
-    let transaction = wallet.end_staking(account_id).await?;
+    let transaction = wallet.end_staking(account_id, None).await?;
 
     println_log_info!(
         "End staking transaction sent:\n{:?}\n{:?}",
@@ -815,7 +826,7 @@ pub async fn extend_staking_command(
 ) -> Result<(), Error> {
     println_log_info!("Extending staking for {account_id} by {additional_epochs} epochs.");
 
-    let transaction = wallet.extend_staking(account_id, additional_epochs).await?;
+    let transaction = wallet.extend_staking(account_id, additional_epochs, None).await?;
 
     println_log_info!(
         "Extend staking transaction sent:\n{:?}\n{:?}",
@@ -868,8 +879,8 @@ pub async fn implicit_account_transition_command(wallet: &Wallet, output_id: Out
 
 // `implicit-accounts` command
 pub async fn implicit_accounts_command(wallet: &Wallet) -> Result<(), Error> {
-    let wallet_data = wallet.data().await;
-    let implicit_accounts = wallet_data.implicit_accounts();
+    let wallet_ledger = wallet.ledger().await;
+    let implicit_accounts = wallet_ledger.implicit_accounts();
     let hrp = wallet.client().get_bech32_hrp().await?;
 
     println_log_info!("Implicit accounts:\n");
@@ -934,7 +945,7 @@ pub async fn mint_nft_command(
     issuer: Option<Bech32Address>,
 ) -> Result<(), Error> {
     let tag = if let Some(hex) = tag {
-        Some(prefix_hex::decode(hex).map_err(|e| Error::Miscellaneous(e.to_string()))?)
+        Some(prefix_hex::decode(hex)?)
     } else {
         None
     };
@@ -965,7 +976,7 @@ pub async fn mint_nft_command(
 
 // `node-info` command
 pub async fn node_info_command(wallet: &Wallet) -> Result<(), Error> {
-    let node_info = serde_json::to_string_pretty(&wallet.client().get_info().await?)?;
+    let node_info = serde_json::to_string_pretty(&wallet.client().get_node_info().await?)?;
 
     println_log_info!("Current node info: {node_info}");
 
@@ -974,11 +985,11 @@ pub async fn node_info_command(wallet: &Wallet) -> Result<(), Error> {
 
 /// `output` command
 pub async fn output_command(wallet: &Wallet, selector: OutputSelector, metadata: bool) -> Result<(), Error> {
-    let wallet_data = wallet.data().await;
+    let wallet_ledger = wallet.ledger().await;
     let output = match selector {
-        OutputSelector::Id(id) => wallet_data.get_output(&id),
+        OutputSelector::Id(id) => wallet_ledger.get_output(&id),
         OutputSelector::Index(index) => {
-            let mut outputs = wallet_data.outputs().values().collect::<Vec<_>>();
+            let mut outputs = wallet_ledger.outputs().values().collect::<Vec<_>>();
             outputs.sort_unstable_by_key(|o| o.output_id);
             outputs.into_iter().nth(index)
         }
@@ -999,7 +1010,7 @@ pub async fn output_command(wallet: &Wallet, selector: OutputSelector, metadata:
 
 /// `outputs` command
 pub async fn outputs_command(wallet: &Wallet) -> Result<(), Error> {
-    print_outputs(wallet.data().await.outputs().values().cloned().collect(), "Outputs:")
+    print_outputs(wallet.ledger().await.outputs().values().cloned().collect(), "Outputs:")
 }
 
 // `send` command
@@ -1023,6 +1034,29 @@ pub async fn send_command(
             },
         )
         .await?;
+
+    println_log_info!(
+        "Transaction sent:\n{:?}\n{:?}",
+        transaction.transaction_id,
+        transaction.block_id
+    );
+
+    Ok(())
+}
+
+// `send-mana` command
+pub async fn send_mana_command(
+    wallet: &Wallet,
+    address: impl ConvertTo<Bech32Address>,
+    mana: u64,
+    gift: bool,
+) -> Result<(), Error> {
+    let params = SendManaParams::new(mana, address.convert()?).with_return_strategy(if gift {
+        ReturnStrategy::Gift
+    } else {
+        ReturnStrategy::Return
+    });
+    let transaction = wallet.send_mana(params, None).await?;
 
     println_log_info!(
         "Transaction sent:\n{:?}\n{:?}",
@@ -1104,11 +1138,11 @@ pub async fn sync_command(wallet: &Wallet) -> Result<(), Error> {
 
 /// `transaction` command
 pub async fn transaction_command(wallet: &Wallet, selector: TransactionSelector) -> Result<(), Error> {
-    let wallet_data = wallet.data().await;
+    let wallet_ledger = wallet.ledger().await;
     let transaction = match selector {
-        TransactionSelector::Id(id) => wallet_data.get_transaction(&id),
+        TransactionSelector::Id(id) => wallet_ledger.get_transaction(&id),
         TransactionSelector::Index(index) => {
-            let mut transactions = wallet_data.transactions().values().collect::<Vec<_>>();
+            let mut transactions = wallet_ledger.transactions().values().collect::<Vec<_>>();
             transactions.sort_unstable_by(|a, b| b.timestamp.cmp(&a.timestamp));
             transactions.into_iter().nth(index)
         }
@@ -1125,8 +1159,8 @@ pub async fn transaction_command(wallet: &Wallet, selector: TransactionSelector)
 
 /// `transactions` command
 pub async fn transactions_command(wallet: &Wallet, show_details: bool) -> Result<(), Error> {
-    let wallet_data = wallet.data().await;
-    let mut transactions = wallet_data.transactions().values().collect::<Vec<_>>();
+    let wallet_ledger = wallet.ledger().await;
+    let mut transactions = wallet_ledger.transactions().values().collect::<Vec<_>>();
     transactions.sort_unstable_by(|a, b| b.timestamp.cmp(&a.timestamp));
 
     if transactions.is_empty() {
@@ -1150,7 +1184,7 @@ pub async fn transactions_command(wallet: &Wallet, show_details: bool) -> Result
 /// `unspent-outputs` command
 pub async fn unspent_outputs_command(wallet: &Wallet) -> Result<(), Error> {
     print_outputs(
-        wallet.data().await.unspent_outputs().values().cloned().collect(),
+        wallet.ledger().await.unspent_outputs().values().cloned().collect(),
         "Unspent outputs:",
     )
 }
@@ -1253,7 +1287,7 @@ async fn print_wallet_address(wallet: &Wallet) -> Result<(), Error> {
     let mut delegations = Vec::new();
     let mut anchors = Vec::new();
 
-    for output_data in wallet.data().await.unspent_outputs().values() {
+    for output_data in wallet.ledger().await.unspent_outputs().values() {
         let output_id = output_data.output_id;
         output_ids.push(output_id);
 
@@ -1343,7 +1377,7 @@ pub enum PromptResponse {
 }
 
 async fn ensure_password(wallet: &Wallet) -> Result<(), Error> {
-    if matches!(*wallet.get_secret_manager().read().await, SecretManager::Stronghold(_))
+    if matches!(*wallet.secret_manager().read().await, SecretManager::Stronghold(_))
         && !wallet.is_stronghold_password_available().await?
     {
         let password = get_password("Stronghold password", false)?;
@@ -1556,6 +1590,10 @@ pub async fn prompt_internal(
                                 allow_micro_amount
                             };
                             send_command(wallet, address, amount, return_address, expiration, allow_micro_amount).await
+                        }
+                        WalletCommand::SendMana { address, mana, gift } => {
+                            ensure_password(wallet).await?;
+                            send_mana_command(wallet, address, mana, gift).await
                         }
                         WalletCommand::SendNativeToken {
                             address,
